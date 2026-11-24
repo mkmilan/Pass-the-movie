@@ -66,7 +66,7 @@ test('expiry, orphan reconciliation, atomic quotas and report intake', {skip:!en
     await Promise.all([storage.put(live,dummy,'video/mp4'),storage.put(orphan,dummy,'video/mp4'),storage.put(unknown,dummy,'video/mp4')]);
     await c.movies.updateOne({_id:doc._id},{$set:{'slots.0.rawKey':live}});
     const retention=createRetentionWorker({collections:c,storage,now:clock});
-    now=new Date(now.getTime()+3600001);
+    now=new Date(Math.max(now.getTime(),Date.now())+7200000);
     await retention.reconcilePage();
     assert.deepEqual((await storage.listPage()).objects.map(o=>o.key),[live]);
     assert.equal((await call('/movies/'+data.publicId,{headers:{Cookie:cookie}})).status,200);
