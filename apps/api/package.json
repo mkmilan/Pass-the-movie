@@ -6,10 +6,12 @@
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch server.mjs",
     "start": "node --env-file-if-exists=../../.env server.mjs",
-    "test": "node --test app.test.mjs"
+    "test": "node --test app.test.mjs",
+    "test:scene": "node --test scene.integration.test.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
-    "mongoose": "^9.0.0"
+    "mongoose": "^9.0.0",
+    "busboy": "^1.6.0"
   }
 }
