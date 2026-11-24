@@ -16,7 +16,8 @@ export async function ensureSceneIndexes(c) {
     c.grants.createIndex({movieId:1}),
     c.budgets.createIndex({purgeAt:1},{expireAfterSeconds:0}),
     c.reports.createIndex({purgeAt:1},{expireAfterSeconds:0}),
-    c.reports.createIndex({status:1,createdAt:1})
+    c.reports.createIndex({status:1,createdAt:1}),
+    c.reports.createIndex({reportId:1},{unique:true})
   ]);
   await initializeBudget(c);
 }
