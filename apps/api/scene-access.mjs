@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { createInitialMovie, isMovieAccessible } from '../../packages/shared/movie-state.mjs';
 import { GAME_RULES as R } from '../../packages/shared/rules.mjs';
+import { reserveBudget } from '../../packages/server/budget.mjs';
 import { activeSlot, grantMatches, turnAccessible, mayManageTurn, slotPath, resetSlotPatch, turnDeadline, inviteDeadline } from '../../packages/server/turns.mjs';
 
 export class SceneError extends Error {
@@ -71,8 +72,7 @@ export function createSceneAccess({collections:c,client,now=()=>new Date()}) {
     const session=client.startSession();
     try {
       await session.withTransaction(async()=>{
-        // Local development cap; a public deployment needs transactional global quotas.
-        if(await c.movies.countDocuments({status:'collecting',expiresAt:{$gt:t}},{session})>=20)fail('QUEUE_FULL',503);
+        await reserveBudget(c,session,'movie',t);
         const inserted=await c.movies.insertOne(movie,{session});
         await c.grants.insertOne({movieId:inserted.insertedId,grantId,role:'creator',slotNumber:1,generation:0,capabilityHash:digest('grant',personal),status:'active',createdAt:t,expiresAt:movie.expiresAt},{session});
         await addSessionGrant(browser,grantId,session);
