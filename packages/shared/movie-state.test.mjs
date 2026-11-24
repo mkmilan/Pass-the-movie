@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createInitialMovie, isMovieAccessible, assertMovieShape } from './movie-state.mjs';
+const make = ()=>createInitialMovie({publicId:"test-movie",creatorGrantId:"test-grant",now:new Date("2026-11-24T00:00:00Z")});
+test("new movie has one creator-only claimed slot", ()=>{const m=make();assert.equal(m.activeSlot,1);assert.equal(m.slots[0].grantId,"test-grant");assert.deepEqual(m.slots.map(s=>s.status),["claimed","locked","locked","locked","locked"]);assert.ok(assertMovieShape(m));});
+test("expiration is enforced at the exact deadline", ()=>{const m=make();assert.equal(m.expiresAt.toISOString(),"2026-12-01T00:00:00.000Z");assert.equal(isMovieAccessible(m,new Date(m.expiresAt.getTime()-1)),true);assert.equal(isMovieAccessible(m,m.expiresAt),false);});
+test("deleted and expired states deny access immediately", ()=>{const m=make();for(const status of ["deleting","deleted","expired"]){assert.equal(isMovieAccessible({...m,status},m.createdAt),false);}});
+test("future slot cannot open early", ()=>{const m=make();m.slots[2].status="open";assert.throws(()=>assertMovieShape(m),/Future slot/);});
+test("no skipped scenes", ()=>{const m=make();m.activeSlot=2;m.slots[1].status="open";assert.throws(()=>assertMovieShape(m),/Previous slot/);});
+test("assembly requires all five accepted", ()=>{const m=make();m.status="assembling";m.activeSlot=null;assert.throws(()=>assertMovieShape(m),/five accepted/);for(const s of m.slots)s.status="accepted";assert.ok(assertMovieShape(m));});
+test("ready requires final key and publication expiry", ()=>{const m=make();m.status="ready";m.activeSlot=null;for(const s of m.slots)s.status="accepted";assert.throws(()=>assertMovieShape(m),/published movie/);m.readyAt=new Date("2026-11-25T00:00:00Z");m.expiresAt=new Date("2026-12-02T00:00:00Z");m.final={key:"private/test.mp4"};assert.ok(assertMovieShape(m));});
+test("creator grant cannot be swapped", ()=>{const m=make();m.slots[0].grantId="different";assert.throws(()=>assertMovieShape(m),/Creator slot mismatch/);});
+test("sixth slot rejected", ()=>{const m=make();m.slots.push({number:6,status:"locked",generation:0});assert.throws(()=>assertMovieShape(m),/Invalid movie slots/);});
+test("invalid date denies access", ()=>{assert.equal(isMovieAccessible(make(),new Date("invalid")),false);assert.throws(()=>createInitialMovie({publicId:"x",creatorGrantId:"y",now:new Date("invalid")}),/valid server date/);});
