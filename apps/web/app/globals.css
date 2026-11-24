@@ -4,3 +4,8 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: #fff9f0; color: #24211e; font-family: system-ui, sans-serif; }
 :focus-visible { outline: 3px solid #24211e; outline-offset: 3px; }
+
+.ptm-primary, .ptm-secondary { min-height: 44px; border-radius: 12px; padding: 10px 16px; font-weight: 700; text-align: center; }
+.ptm-primary { background: #b63222; color: white; border: 1px solid #b63222; }
+.ptm-secondary { background: white; color: #24211e; border: 1px solid #24211e; }
+button:disabled { opacity: .5; cursor: not-allowed; }
