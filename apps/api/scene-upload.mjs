@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { GAME_RULES as R } from '../../packages/shared/rules.mjs';
+import { reserveBudget } from '../../packages/server/budget.mjs';
 import { slotPath } from '../../packages/server/turns.mjs';
 import { fail, SceneError, consentSnapshot } from './scene-access.mjs';
 
@@ -43,7 +44,7 @@ async function readMultipart(req,path) {
   return {type,consent};
 }
 
-export function createSceneUploader({collections:c,storage,now=()=>new Date()}) {
+export function createSceneUploader({collections:c,client,storage,now=()=>new Date(),onReserve=()=>{}}) {
   async function upload(req,{movie,grant}) {
     const key=req.get('Idempotency-Key');
     if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,128}$/.test(key))fail('IDEMPOTENCY_KEY_REQUIRED',422);
@@ -54,8 +55,15 @@ export function createSceneUploader({collections:c,storage,now=()=>new Date()}) 
     if((s.uploadCount||0)>=3)fail('UPLOAD_LIMIT',429);
     const attempt=randomUUID(),rawKey='movies/'+movie.publicId+'/raw/'+n+'/'+attempt+'.clip';
     const scope={_id:movie._id,revision:movie.revision,status:'collecting',activeSlot:n,expiresAt:{$gt:t},[p+'grantId']:grant.grantId,[p+'generation']:grant.generation,[p+'status']:s.status,[p+'reservationUntil']:{$gt:t}};
-    const reserved=await c.movies.updateOne(scope,{$set:{[p+'status']:'uploading',[p+'uploadAttemptId']:attempt,[p+'uploadIdempotencyHash']:hash,[p+'uploadStartedAt']:t,[p+'rawKey']:rawKey,[p+'errorCode']:null},$inc:{revision:1,[p+'uploadCount']:1}});
-    if(reserved.modifiedCount!==1)fail('TURN_CONFLICT',409);
+    onReserve(req,grant);
+    const session=client.startSession();
+    try{
+      await session.withTransaction(async()=>{
+        await reserveBudget(c,session,'upload',t);
+        const reserved=await c.movies.updateOne(scope,{$set:{[p+'status']:'uploading',[p+'uploadAttemptId']:attempt,[p+'uploadIdempotencyHash']:hash,[p+'uploadStartedAt']:t,[p+'rawKey']:rawKey,[p+'errorCode']:null},$inc:{revision:1,[p+'uploadCount']:1}},{session});
+        if(reserved.modifiedCount!==1)fail('TURN_CONFLICT',409);
+      });
+    }finally{await session.endSession();}
     let dir;
     try{
       dir=await mkdtemp(join(tmpdir(),'ptm-upload-'));const path=join(dir,'raw.clip');
