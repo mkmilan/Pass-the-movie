@@ -1,0 +1,28 @@
+# LOCAL DEVELOPMENT ONLY: services exposed to loopback, no production credentials.
+services:
+  mongo:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ping:1}).ok === 1 ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  storage:
+    # Local integration mock only. It does NOT enforce production bucket access controls.
+    image: adobe/s3mock:5.2.3
+    ports:
+      - "127.0.0.1:9000:9090"
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ptm-local
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: "true"
+    volumes:
+      - storage_data:/s3mockroot
+volumes:
+  mongo_data:
+  storage_data:
