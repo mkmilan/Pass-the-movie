@@ -33,6 +33,8 @@ export function movieDto(movie,token,grant) {
     canInvite:manage&&current.status==='open',canReplace:manage&&current.status!=='accepted',
     canReference:n>1&&movie.activeSlot===n&&slot.status!=='accepted',
     canAbandon:movie.status==='collecting'&&movie.activeSlot===n&&slot.status!=='accepted',
+    canViewFinal:movie.status==='ready'&&slot.status==='accepted'&&!!movie.final?.key,
+    final:movie.status==='ready'&&slot.status==='accepted'&&movie.final?{duration:movie.final.duration,frames:movie.final.frames,bytes:movie.final.bytes,publishedAt:movie.final.publishedAt.toISOString()}:null,
     csrfToken:csrfFor(token)};
 }
 export function createSceneAccess({collections:c,client,now=()=>new Date()}) {
