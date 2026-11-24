@@ -4,6 +4,7 @@ import { createStorage } from '../../packages/server/storage.mjs';
 import { sceneCollections, ensureSceneIndexes } from '../../packages/server/scene-db.mjs';
 import { createMediaProcessor } from './media.mjs';
 import { createSceneWorker } from './scene-worker.mjs';
+import { createRetentionWorker } from './retention.mjs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 let stopping=false, storage;
@@ -18,9 +19,14 @@ try{
   storage=createStorage(config);await storage.ready();
   const media=createMediaProcessor({ffmpeg:process.env.FFMPEG_PATH||'ffmpeg',ffprobe:process.env.FFPROBE_PATH||'ffprobe'});
   const worker=createSceneWorker({collections,storage,media});
-  console.log('Local single-scene worker started');
+  const retention=createRetentionWorker({collections,storage});
+  let nextRetention=0;
+  console.log('Local movie worker started');
   while(!stopping){
-    try{if(!await worker.runOne())await sleep(1000);}
+    try{
+      if(Date.now()>=nextRetention){nextRetention=Date.now()+30000;await retention.tick();}
+      if(!await worker.runOne())await sleep(1000);
+    }
     catch{console.error('WORKER_RETRY');await sleep(2000);}
   }
 }catch{
