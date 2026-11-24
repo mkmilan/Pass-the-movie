@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { GAME_RULES as R } from '../../packages/shared/rules.mjs';
+import { slotPath } from '../../packages/server/turns.mjs';
 import { fail, SceneError, consentSnapshot } from './scene-access.mjs';
 
 async function readMultipart(req,path) {
@@ -46,14 +47,14 @@ export function createSceneUploader({collections:c,storage,now=()=>new Date()}) 
   async function upload(req,{movie,grant}) {
     const key=req.get('Idempotency-Key');
     if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,128}$/.test(key))fail('IDEMPOTENCY_KEY_REQUIRED',422);
-    const hash=createHash('sha256').update(key).digest('hex'),s=movie.slots[0],t=now();
+    const hash=createHash('sha256').update(key).digest('hex'),n=grant.slotNumber,p=slotPath(n),s=movie.slots[n-1],t=now();
     if(s.uploadIdempotencyHash===hash&&['uploading','queued','accepted','retryable'].includes(s.status))
       return {status:s.status,duplicate:true};
-    if(movie.status!=='collecting'||movie.activeSlot!==1||!['claimed','retryable'].includes(s.status)||s.reservationUntil<=t)fail('TURN_UNAVAILABLE',409);
+    if(movie.status!=='collecting'||movie.activeSlot!==n||!['claimed','retryable'].includes(s.status)||s.reservationUntil<=t)fail('TURN_UNAVAILABLE',409);
     if((s.uploadCount||0)>=3)fail('UPLOAD_LIMIT',429);
-    const attempt=randomUUID(),rawKey='movies/'+movie.publicId+'/raw/1/'+attempt+'.clip';
-    const scope={_id:movie._id,revision:movie.revision,status:'collecting',activeSlot:1,expiresAt:{$gt:t},'slots.0.grantId':grant.grantId,'slots.0.generation':grant.generation,'slots.0.status':s.status,'slots.0.reservationUntil':{$gt:t}};
-    const reserved=await c.movies.updateOne(scope,{$set:{'slots.0.status':'uploading','slots.0.uploadAttemptId':attempt,'slots.0.uploadIdempotencyHash':hash,'slots.0.uploadStartedAt':t,'slots.0.rawKey':rawKey,'slots.0.errorCode':null},$inc:{revision:1,'slots.0.uploadCount':1}});
+    const attempt=randomUUID(),rawKey='movies/'+movie.publicId+'/raw/'+n+'/'+attempt+'.clip';
+    const scope={_id:movie._id,revision:movie.revision,status:'collecting',activeSlot:n,expiresAt:{$gt:t},[p+'grantId']:grant.grantId,[p+'generation']:grant.generation,[p+'status']:s.status,[p+'reservationUntil']:{$gt:t}};
+    const reserved=await c.movies.updateOne(scope,{$set:{[p+'status']:'uploading',[p+'uploadAttemptId']:attempt,[p+'uploadIdempotencyHash']:hash,[p+'uploadStartedAt']:t,[p+'rawKey']:rawKey,[p+'errorCode']:null},$inc:{revision:1,[p+'uploadCount']:1}});
     if(reserved.modifiedCount!==1)fail('TURN_CONFLICT',409);
     let dir;
     try{
@@ -61,15 +62,21 @@ export function createSceneUploader({collections:c,storage,now=()=>new Date()}) 
       const {type,consent}=await readMultipart(req,path);
       const acceptedConsent=consentSnapshot(consent,now());
       await storage.put(rawKey,path,type);
-      const job={jobId:randomUUID(),type:'normalize',slot:1,generation:grant.generation,status:'pending',attempt:0,nextRunAt:now(),leaseId:null,leaseUntil:null,lastErrorCode:null};
-      const queued=await c.movies.updateOne({_id:movie._id,revision:movie.revision+1,status:'collecting',activeSlot:1,expiresAt:{$gt:now()},'slots.0.generation':grant.generation,'slots.0.uploadAttemptId':attempt,'slots.0.status':'uploading'},{$set:{'slots.0.status':'queued','slots.0.consent':acceptedConsent,work:job},$inc:{revision:1}});
+      const job={jobId:randomUUID(),type:'normalize',slot:n,generation:grant.generation,status:'pending',attempt:0,nextRunAt:now(),leaseId:null,leaseUntil:null,lastErrorCode:null};
+      const queued=await c.movies.updateOne({_id:movie._id,revision:movie.revision+1,status:'collecting',activeSlot:n,expiresAt:{$gt:now()},[p+'generation']:grant.generation,[p+'uploadAttemptId']:attempt,[p+'status']:'uploading'},{$set:{[p+'status']:'queued',[p+'consent']:acceptedConsent,work:job},$inc:{revision:1}});
       if(queued.modifiedCount!==1)fail('TURN_CONFLICT',409);
       return {status:'queued',duplicate:false};
     }catch(e){
       const code=e instanceof SceneError?e.code:'UPLOAD_INTERRUPTED';
       // Unique attempt key: a stale attempt cannot overwrite another attempt.
       // Queue the key for repeatable cleanup; only clear this exact reservation.
-      await c.movies.updateOne({_id:movie._id,'slots.0.uploadAttemptId':attempt,'slots.0.status':'uploading'},{$set:{'slots.0.status':'retryable','slots.0.rawKey':null,'slots.0.errorCode':code},$addToSet:{cleanupPending:rawKey},$inc:{revision:1}});
+      // If the turn was replaced during object upload, schedule its unique key
+      // after the storage call has settled. Never remove a successfully queued key.
+      const rollback=await c.movies.updateOne({_id:movie._id,[p+'uploadAttemptId']:attempt,[p+'generation']:grant.generation,[p+'status']:'uploading'},{$set:{[p+'status']:'retryable',[p+'rawKey']:null,[p+'errorCode']:code},$addToSet:{cleanupPending:rawKey},$inc:{revision:1}});
+      if(rollback.modifiedCount!==1){
+        const current=await c.movies.findOne({_id:movie._id});
+        if(current&&current.slots[n-1].rawKey!==rawKey)await c.movies.updateOne({_id:movie._id},{$addToSet:{cleanupPending:rawKey}});
+      }
       if(e instanceof SceneError)throw e;
       fail('UPLOAD_INTERRUPTED',503);
     }finally{if(dir)await rm(dir,{recursive:true,force:true});}
