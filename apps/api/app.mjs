@@ -7,6 +7,10 @@ export function createApp(scene = null) {
   app.use((_req, res, next) => {
     res.set('Cache-Control', 'no-store');
     res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Referrer-Policy','no-referrer');
+    res.set('X-Robots-Tag','noindex, nofollow');
+    res.set('X-Frame-Options','DENY');
+    res.set('Content-Security-Policy',"default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     next();
   });
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
