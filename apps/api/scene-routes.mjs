@@ -4,23 +4,44 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSceneAccess, movieDto, SceneError } from './scene-access.mjs';
 import { createSceneUploader } from './scene-upload.mjs';
+import { createRateLimiter, RateError } from '../../packages/server/rate-limit.mjs';
+import { BudgetError } from '../../packages/server/budget.mjs';
+import { createReporter } from './reports.mjs';
 
 export function createSceneRouter({config,collections,client,storage,now}) {
-  const router=express.Router(),access=createSceneAccess({collections,client,now}),uploader=createSceneUploader({collections,storage,now});
+  const router=express.Router(),access=createSceneAccess({collections,client,now});
+  const limiter=createRateLimiter({now});
+  const source=req=>req.socket.remoteAddress||'unknown';
+  const uploader=createSceneUploader({collections,client,storage,now,onReserve(req,grant){
+    limiter.check('upload-grant',grant.grantId,3,60000);
+    limiter.check('upload-ip',source(req),30,60000);
+  }});
+  const report=createReporter({collections,client,now});
   router.use((req,res,next)=>{
     const origin=req.get('Origin');
     if(origin!==config.webOrigin && origin!==config.apiOrigin) return res.status(403).json({code:'ORIGIN_INVALID'});
     res.set('Vary','Origin');
     res.set('Access-Control-Allow-Origin',origin);
     res.set('Access-Control-Allow-Credentials','true');
-    res.set('Access-Control-Allow-Methods','GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Methods','GET, POST, DELETE, OPTIONS');
     res.set('Access-Control-Allow-Headers','Content-Type, X-CSRF-Token, Idempotency-Key');
     if(req.method==='OPTIONS')return res.sendStatus(204);
+    limiter.check('api',source(req),300,60000);
+    if(req.method==='POST'&&/\/(claim|access)$/.test(req.path))limiter.check('capability',source(req),30,60000);
     next();
   });
   const json=express.json({limit:'4kb',strict:true});
   router.get('/session',async(req,res)=>res.json(await access.sessionInfo(req)));
-  router.post('/movies',json,async(req,res)=>res.status(201).json(await access.create(req,res)));
+  router.post('/movies',json,async(req,res)=>{
+    if(config.newMoviesPaused)throw new SceneError('CREATION_PAUSED',503);
+    limiter.check('creation',source(req),10,60000);
+    res.status(201).json(await access.create(req,res));
+  });
+  router.post('/reports',json,async(req,res)=>{
+    limiter.check('report',source(req),5,600000);
+    res.status(201).json(await report(req));
+  });
+  router.delete('/movies/:id',json,async(req,res)=>res.status(202).json(await access.deleteMovie(req,await access.authorize(req,{mutation:true}))));
   router.post('/movies/:id/access',json,async(req,res)=>res.json(await access.recover(req,res)));
   router.get('/movies/:id',async(req,res)=>{
     const {movie,token,grant}=await access.authorize(req);res.json(movieDto(movie,token,grant));
@@ -75,7 +96,8 @@ export function createSceneRouter({config,collections,client,storage,now}) {
   // Individual scene videos remain inaccessible.
   router.use((err,req,res,next)=>{
     if(res.headersSent)return next(err);
-    if(err instanceof SceneError)return res.status(err.status).json({code:err.code});
+    if(err instanceof RateError){res.set('Retry-After',String(err.retryAfter));return res.status(429).json({code:err.code});}
+    if(err instanceof SceneError||err instanceof BudgetError)return res.status(err.status).json({code:err.code});
     if(err.type==='entity.too.large')return res.status(413).json({code:'REQUEST_TOO_LARGE'});
     if(err.type==='entity.parse.failed')return res.status(422).json({code:'INVALID_JSON'});
     console.error('SINGLE_SCENE_REQUEST_FAILED');
