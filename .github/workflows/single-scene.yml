@@ -13,7 +13,7 @@ permissions:
   contents: read
 jobs:
   single-scene:
-    if: github.head_ref == 'feat/single-scene' || github.head_ref == 'feat/movie-chain' || github.head_ref == 'feat/movie-reveal'
+    if: github.head_ref == 'feat/single-scene' || github.head_ref == 'feat/movie-chain' || github.head_ref == 'feat/movie-reveal' || github.head_ref == 'feat/hardening'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -52,7 +52,7 @@ jobs:
             sleep 2
           done
           exit 1
-      - name: API and worker integration
+      - name: API, worker and retention integration
         run: |
           npm run test --workspace @ptm/api
           npm run test:scene --workspace @ptm/api
