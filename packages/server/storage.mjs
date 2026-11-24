@@ -1,4 +1,4 @@
-import { S3Client, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { Transform } from 'node:stream';
@@ -35,6 +35,14 @@ export function createStorage(config) {
       if(bytes!==size)throw new Error('STORAGE_SIZE_MISMATCH');
     },
     async remove(key){keyCheck(key);await send(new DeleteObjectCommand({Bucket:bucket,Key:key}));},
+    async listPage({prefix='movies/',cursor}={}){
+      if(prefix!=='movies/'&&!/^movies\/[a-zA-Z0-9-]+\/$/.test(prefix))throw new Error('STORAGE_PREFIX_INVALID');
+      const response=await send(new ListObjectsV2Command({Bucket:bucket,Prefix:prefix,MaxKeys:100,...(cursor?{ContinuationToken:cursor}:{})}));
+      const objects=(response.Contents||[]).map(o=>({key:o.Key,lastModified:o.LastModified}));
+      for(const o of objects){keyCheck(o.key);if(!o.key.startsWith(prefix))throw new Error('STORAGE_PREFIX_MISMATCH');}
+      if(response.IsTruncated&&!response.NextContinuationToken)throw new Error('STORAGE_CURSOR_MISSING');
+      return {objects,cursor:response.IsTruncated?response.NextContinuationToken:null};
+    },
     close(){client.destroy();}
   };
 }
