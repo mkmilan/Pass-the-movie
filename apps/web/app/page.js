@@ -20,9 +20,10 @@ export default function Home() {
       <p className="text-lg leading-relaxed">Record your scene, pass the last frame to a friend, and reveal the {OUTPUT.movieSeconds}-second film together.</p>
       <section className="rounded-2xl border border-[#24211e] p-4">
         <h2 className="font-bold">Development preview</h2>
-        <p className="mt-1 text-sm">The first-scene flow is available in local development. Invitations and final reveal are not connected yet.</p>
+        <p className="mt-1 text-sm">The complete five-scene game is available for synthetic local testing. No public service is running.</p>
       </section>
-      <a href="/scene" className="ptm-primary">Test first scene locally</a>
+      <a href="/scene" className="ptm-primary">Test movie locally</a>
+      <footer className="flex gap-4 text-sm"><a className="underline" href="/privacy">Privacy and recording rules</a><a className="underline" href="/report">Report a concern</a></footer>
     </main>
   );
 }
