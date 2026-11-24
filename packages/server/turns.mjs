@@ -7,7 +7,7 @@ export const slotPath = n => {
 };
 export const activeSlot = movie => Number.isInteger(movie.activeSlot) ? movie.slots[movie.activeSlot - 1] : null;
 export function grantMatches(movie, grant) {
-  const slot = movie.slots[grant?.slotNumber - 1];
+  const slot = movie.slots?.[grant?.slotNumber - 1];
   return !!slot && grant.status === 'active' && slot.grantId === grant.grantId && slot.generation === grant.generation &&
     (slot.number === 1 ? grant.role === 'creator' && movie.creatorGrantId === grant.grantId : grant.role === 'contributor');
 }
