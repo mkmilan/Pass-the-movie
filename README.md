@@ -11,6 +11,7 @@ Mobile-first web game: every new contributor sees only the previous scene's fina
 - Phase 2: local single-scene API, worker and storage integration passed on GitHub Actions (run 45484100532). Browser checks remain.
 - Phase 3: invitation-only chain, five ordered turns, previous-frame access, scoped sessions, turn replacement, expiry and an atomic final-assembly handoff. See `docs/phase-4-status.md`, `docs/phase-3-status.md` for evidence and remaining gates.
 - Phase 4: final 15-second MP4 assembly, private reveal, local download and optional native file sharing. See `docs/phase-4-status.md`.
+- Phase 5: local deletion, expiry, reporting and transactional budget controls. See `docs/phase-5-status.md` and `docs/production-gates.md`.
 - No public launch yet. Camera experiment is separate in `spike/`.
 
 ## Local development (developer-only)
@@ -27,4 +28,8 @@ Prerequisites: Node 22 (22.12+), npm, Docker Compose, FFmpeg/ffprobe with H.264,
 
 The single-scene routes and worker fail closed outside localhost or when production mode is selected. The current local cookie is deliberately HTTP-only development configuration (not the production Secure cookie). Public hosting and the real R2 bucket require further authorization, configuration and testing.
 
-See `docs/phase-3-status.md`, `docs/phase-2-status.md` and `spike/portrait-test-notes.md`. Do not commit actual participant videos.
+See `docs/phase-5-status.md`, `docs/phase-4-status.md`, `docs/phase-3-status.md`, `docs/phase-2-status.md` and `spike/portrait-test-notes.md`. Do not commit actual participant videos.
+
+## Local report review
+
+From `apps/api`, run `node --env-file-if-exists=../../.env reports-admin.mjs list`. For local synthetic reports only, use `close <report-id> --confirm` or `revoke <report-id> --confirm` in place of `list` after review. Revoke schedules whole-movie deletion; never use it as an automatic report response. This is not a production moderation interface.
