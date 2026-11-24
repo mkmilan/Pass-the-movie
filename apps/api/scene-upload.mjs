@@ -10,7 +10,7 @@ import { GAME_RULES as R } from '../../packages/shared/rules.mjs';
 import { fail, SceneError, consentSnapshot } from './scene-access.mjs';
 
 async function readMultipart(req,path) {
-  let bb;try{bb=Busboy({headers:req.headers,limits:{fileSize:R.maxUploadBytes+1,files:1,fields:1,parts:2,fieldSize:2048,headerPairs:50}});}
+  let bb;try{bb=Busboy({headers:req.headers,limits:{fileSize:R.maxUploadBytes+1,files:1,fields:1,parts:3,fieldSize:2048,headerPairs:50}});}
   catch{fail('MULTIPART_REQUIRED',422);}
   let filePromise=null,consent,problem=null,total=0;
   const error=code=>{problem ||= code;};
