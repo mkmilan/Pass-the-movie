@@ -13,6 +13,11 @@
     "dev:web": "npm run dev --workspace @ptm/web",
     "dev:api": "npm run dev --workspace @ptm/api",
     "build:web": "npm run build --workspace @ptm/web",
-    "check:media": "npm run check --workspace @ptm/worker"
+    "check:media": "npm run check --workspace @ptm/worker",
+    "test:media": "node --test apps/worker/media.test.mjs",
+    "dev:worker": "npm run dev --workspace @ptm/worker"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.900.0"
   }
 }
