@@ -14,6 +14,7 @@ import { createStorage } from '../../packages/server/storage.mjs';
 import { createApp } from './app.mjs';
 import { createSceneWorker } from '../worker/scene-worker.mjs';
 import { createAssemblyWorker } from '../worker/assembly-worker.mjs';
+import { createRetentionWorker } from '../worker/retention.mjs';
 import { writeFile } from 'node:fs/promises';
 
 const enabled=process.env.PTM_INTEGRATION_TEST==='1';
@@ -99,6 +100,7 @@ test('five-scene chain: invitation races, private references, assembly, reveal a
     assert.equal((await claim(makeBrowser(),freshLink.inviteToken)).status,404);
     assert.equal((await claim(oldContributor,freshLink.inviteToken)).status,200);
     await checkReference(oldContributor,2);
+    assert.equal((await oldContributor.call(path,{method:'DELETE',select:true,json:{confirm:true}})).status,403);
     assert.equal((await reference(creator)).status,404);
     assert.equal((await upload(creator,2)).status,404);
     assert.equal((await oldContributor.call(path+'/invite',{method:'POST',json:{}})).status,409);
@@ -204,8 +206,35 @@ test('five-scene chain: invitation races, private references, assembly, reveal a
       if(i===1)assert.ok(rms<15,'silent scene must remain silent');
       else {assert.ok(rms>200);assert.ok(Math.abs(crossings/0.4-(440+110*i))<15,'audio order');}
     }
-    now=new Date(persisted.expiresAt);
-    assert.equal((await creator.call(path+'/final',{select:true})).status,410);
+    // An accepted contributor can withdraw the entire movie, even when ready.
+    assert.equal((await anonymous.call(path,{method:'DELETE',json:{confirm:true}})).status,401);
+    assert.equal((await participants[1].call(path,{method:'DELETE',select:true,json:{confirm:false}})).status,422);
+    const removed=await participants[1].call(path,{method:'DELETE',select:true,json:{confirm:true}});
+    assert.equal(removed.status,202);assert.equal((await removed.json()).status,'deleting');
+    for(const b of participants)assert.equal((await b.call(path+'/final',{select:true})).status,404);
+    assert.equal((await collections.grants.countDocuments({movieId:persisted._id,status:'active'})),0);
+    const grantIds=(await collections.grants.find({movieId:persisted._id}).toArray()).map(g=>g.grantId);
+    const retention=createRetentionWorker({collections,storage,now:clock});
+    assert.equal(await retention.cleanOne(),true);
+    assert.equal((await storage.listPage({prefix:'movies/'+createdMovie.publicId+'/'})).objects.length,0);
+    assert.equal(await retention.cleanOne(),false);
+    // Simulate a late storage write after initial deletion.
+    const late='movies/'+createdMovie.publicId+'/final/late-job/late-lease.mp4';
+    await storage.put(late,finalPath,'video/mp4');
+    now=new Date(now.getTime()+600001);
+    assert.equal(await retention.cleanOne(),true);
+    assert.equal((await storage.listPage({prefix:'movies/'+createdMovie.publicId+'/'})).objects.length,0);
+    assert.ok((await collections.movies.findOne({_id:persisted._id})).slots);
+    now=new Date(now.getTime()+600001);
+    assert.equal(await retention.cleanOne(),true);
+    const tombstone=await collections.movies.findOne({_id:persisted._id});
+    assert.equal(tombstone.status,'deleted');assert.equal(tombstone.slots,undefined);
+    assert.equal(tombstone.final,undefined);assert.ok(tombstone.purgeAt);
+    assert.equal(await collections.grants.countDocuments({movieId:persisted._id}),0);
+    assert.equal(await collections.sessions.countDocuments({grantIds:{$in:grantIds}}),0);
+    now=new Date(tombstone.purgeAt.getTime()+1);
+    assert.equal(await retention.cleanOne(),true);
+    assert.equal(await collections.movies.findOne({_id:persisted._id}),null);
   }finally{
     if(server)await new Promise(resolve=>server.close(resolve));
     storage?.close();
