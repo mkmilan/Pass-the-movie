@@ -33,6 +33,7 @@ export function movieDto(movie,token,grant) {
     canInvite:manage&&current.status==='open',canReplace:manage&&current.status!=='accepted',
     canReference:n>1&&movie.activeSlot===n&&slot.status!=='accepted',
     canAbandon:movie.status==='collecting'&&movie.activeSlot===n&&slot.status!=='accepted',
+    canDelete:grant.role==='creator'||slot.status==='accepted',
     canViewFinal:movie.status==='ready'&&slot.status==='accepted'&&!!movie.final?.key,
     final:movie.status==='ready'&&slot.status==='accepted'&&movie.final?{duration:movie.final.duration,frames:movie.final.frames,bytes:movie.final.bytes,publishedAt:movie.final.publishedAt.toISOString()}:null,
     csrfToken:csrfFor(token)};
@@ -178,6 +179,22 @@ export function createSceneAccess({collections:c,client,now=()=>new Date()}) {
     }finally{await session.endSession();}
     return result;
   }
+  async function deleteMovie(req,{movie,grant}) {
+    const t=now();
+    if(req.body?.confirm!==true)fail('CONFIRMATION_REQUIRED',422);
+    if(grant.role!=='creator'&&movie.slots[grant.slotNumber-1].status!=='accepted')fail('DELETE_FORBIDDEN',403);
+    if(!isMovieAccessible(movie,t))fail('MOVIE_EXPIRED',410);
+    const session=client.startSession();
+    try{
+      await session.withTransaction(async()=>{
+        const r=await c.movies.updateOne({_id:movie._id,revision:movie.revision,status:movie.status,expiresAt:{$gt:now()}},
+          {$set:{status:'deleting',activeSlot:null,work:null,cleanup:{status:'pending',nextRunAt:now(),attempt:0}},$inc:{revision:1}},{session});
+        if(r.modifiedCount!==1)fail('TURN_CONFLICT',409);
+        await c.grants.updateMany({movieId:movie._id},{$set:{status:'revoked'}},{session});
+      });
+    }finally{await session.endSession();}
+    return {status:'deleting'};
+  }
   async function rotateAccess({movie,grant}) {
     const personal=secret(),t=now();
     if(!isMovieAccessible(movie,t)||!turnAccessible(movie,grant,t))fail('TURN_UNAVAILABLE',409);
@@ -188,5 +205,5 @@ export function createSceneAccess({collections:c,client,now=()=>new Date()}) {
   // Allows an existing browser to obtain a CSRF token before creating/recovering
   // another movie. Requires the exact configured origin in the router.
   async function sessionInfo(req){const browser=await sessionFor(req);return {csrfToken:browser?csrfFor(browser.token):null};}
-  return {create,authorize,recover,sessionInfo,issueInvite,claim,replace,rotateAccess};
+  return {create,authorize,recover,sessionInfo,issueInvite,claim,replace,rotateAccess,deleteMovie};
 }
