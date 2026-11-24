@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+coverage/
+.env*
+!.env.example
+*.log
+*.mp4
+*.webm
+*.mov
+*.m4v
+*.avi
+spike/local-recordings/
+tmp/
+.DS_Store

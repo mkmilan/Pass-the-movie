@@ -1,0 +1,65 @@
+name: Scene integration checks
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "package.json"
+      - "docker-compose.yml"
+      - "docs/**"
+      - ".github/workflows/single-scene.yml"
+permissions:
+  contents: read
+jobs:
+  single-scene:
+    if: github.head_ref == 'feat/single-scene' || github.head_ref == 'feat/movie-chain' || github.head_ref == 'feat/movie-reveal' || github.head_ref == 'feat/hardening'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      R2_ENDPOINT: http://127.0.0.1:9000
+      R2_ACCESS_KEY_ID: ptm-local-ci
+      R2_SECRET_ACCESS_KEY: local-ci-test-password
+      PTM_INTEGRATION_TEST: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - name: FFmpeg
+        run: |
+          if ! command -v ffmpeg; then sudo apt-get update && sudo apt-get install -y ffmpeg; fi
+          if ! test -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf; then sudo apt-get update && sudo apt-get install -y fonts-dejavu-core; fi
+          ffmpeg -version
+          npm run check:media
+      - name: Unit and synthetic media tests
+        run: |
+          npm test
+          npm run test:media
+      - name: Start disposable local services
+        run: |
+          docker compose up -d
+          for i in $(seq 1 40); do
+            if docker compose exec -T mongo mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok === 1 ? 0 : 1)'; then break; fi
+            sleep 2
+          done
+          docker compose exec -T mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'
+          for i in $(seq 1 40); do
+            if docker compose exec -T mongo mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' && curl --fail --silent http://127.0.0.1:9000/favicon.ico; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: API, worker and retention integration
+        run: |
+          npm run test --workspace @ptm/api
+          npm run test:scene --workspace @ptm/api
+      - name: Build web scaffold
+        run: npm run build:web
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Remove disposable services
+        if: always()
+        run: docker compose down -v
