@@ -27,7 +27,7 @@ export default function CameraCapture({onTake,disabled=false}) {
   }
   useEffect(()=>{
     alive.current=true;
-    const hide=()=>{if(document.hidden&&camera.current)interrupt('Camera paused. Open it again.');};
+    const hide=()=>{if(document.hidden&&(camera.current||!url.current))interrupt('Camera paused. Open it again.');};
     const rotate=()=>{if(recorder.current)interrupt('Keep your phone upright and retake.');};
     document.addEventListener('visibilitychange',hide);window.addEventListener('orientationchange',rotate);
     return()=>{alive.current=false;interrupt('');if(url.current)URL.revokeObjectURL(url.current);document.removeEventListener('visibilitychange',hide);window.removeEventListener('orientationchange',rotate);};
