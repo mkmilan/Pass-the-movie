@@ -109,7 +109,7 @@ export function createRetentionWorker({collections:{movies,grants,sessions},stor
     const page=await storage.listPage({cursor});
     const cutoff=now().getTime()-ORPHAN_AGE;
     for(const object of page.objects){
-      if(!(object.lastModified instanceof Date)||object.lastModified.getTime()>cutoff)continue;
+      if(!(object.lastModified instanceof Date)||!Number.isFinite(object.lastModified.getTime())||object.lastModified.getTime()>cutoff)continue;
       const id=object.key.split('/')[1];
       const m=await movies.findOne({publicId:id});
       if(m&&liveStates.includes(m.status)&&protectedKeys(m).has(object.key))continue;
