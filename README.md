@@ -2,31 +2,27 @@
 
 Five friends. Three seconds each. One unpredictable movie.
 
-A mobile-first web game: five people record one scene each; every new contributor sees only the preceding scene's final frame. The full 15-second movie is revealed after scene five.
+Mobile-first web game: every new contributor sees only the previous scene's final frame. Five accepted three-second scenes will eventually form the 15-second reveal.
 
 ## Development status
 
-- Phase 0 Android capture and FFmpeg normalization/assembly demonstrated. iPhone Safari and remaining real-device checks are open.
-- Phase 1 foundation in progress: Next.js App Router, Tailwind, Express/Mongoose, shared game rules and state invariants, FFmpeg preflight and local infrastructure configuration.
-- No functioning movie creation, uploads, invitations, storage integration, queue or public app yet.
-- Camera experiment lives at `spike/` and is independent of the application.
+- Phase 0: Android capture and FFmpeg mixed-format composition demonstrated; iPhone and further real-device checks remain.
+- Phase 1: JavaScript workspaces, state/config tests, Next.js/Tailwind and Express health checks.
+- Phase 2: local-only movie creation, creator recovery, consent, recording/review, bounded idempotent upload, private storage adapter, leased normalization and last-frame extraction. Integration and browser checks are release gates.
+- No invitation flow, final reveal or public launch yet. Camera experiment is separate in `spike/`.
 
-## Local development
+## Local development (developer-only)
 
-Prerequisites: Node 22 (22.12 or newer in that major), npm, Docker Compose, FFmpeg/ffprobe (H.264/AAC encoders).
+Prerequisites: Node 22 (22.12+), npm, Docker Compose, FFmpeg/ffprobe with H.264 and AAC encoders. Use synthetic media until deletion and public-safety controls are finished.
 
-From the repository root:
+1. Copy `.env.example` to `.env`. Set `SINGLE_SCENE_DEV_ENABLED=true`. Fill the two local R2 credential fields with non-secret dummy credentials, e.g. `local-test-user` and `local-test-password`. Never use actual cloud credentials for this local setup.
+2. Run `docker compose up -d`. MongoDB and S3Mock are bound only to loopback. S3Mock automatically creates the `ptm-local` bucket. It is a test double, not an authentication-enforcing production store. Never expose it or use it for personal recordings.
+3. Initialize the single-node replica set once: `docker compose exec mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'`. Verify `docker compose exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary'` returns true. Check `curl -fsS http://127.0.0.1:9000/favicon.ico` for mock readiness.
+4. Run `npm install` in the repository root. The dependency lockfile still needs review.
+5. In three terminals: `npm run dev:web`, `npm run dev:api`, `npm run dev:worker`. Open http://localhost:3000/scene. API health is at http://localhost:4000/healthz. Use the same hostname in web and API origins.
+6. Run `npm test`, `npm run test:media`, `npm run test --workspace @ptm/api`, `npm run check:media`, `npm run build:web`. The integration workflow also starts disposable MongoDB/S3Mock and runs `npm run test:scene --workspace @ptm/api` with `PTM_INTEGRATION_TEST=1` and its local storage environment.
+7. Stop local services with `docker compose down`. For disposable synthetic-only test data, `docker compose down -v` deletes local volumes; do not use it against unrelated data.
 
-1. Copy `.env.example` to `.env`. Choose a local storage username (at least 3 characters) and password (at least 8 characters) for the two blank R2 credential fields. Never commit credentials or expose these development services to the internet.
-2. Start local services: `docker compose up -d`.
-3. Initialize the single-node test replica set once: `docker compose exec mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'`. Verify `docker compose exec mongo mongosh --quiet --eval 'db.hello().isWritablePrimary'` returns true before starting the API. This is a local test deployment, not a production MongoDB configuration.
-4. Open the local storage console at http://127.0.0.1:9001 and create a private bucket named `ptm-local`. No application storage writes are implemented yet.
-5. Run `npm install` at the repository root. The first successful installation must produce a reviewed lockfile before we consider builds reproducible.
-6. In separate terminals, run `npm run dev:web` and `npm run dev:api`. The web scaffold is at http://localhost:3000; API health is at http://127.0.0.1:4000/healthz.
-7. Run `npm test`, `npm run test --workspace @ptm/api`, `npm run check:media`, and `npm run build:web`.
+The single-scene routes and worker fail closed outside localhost or when production mode is selected. The current local cookie is deliberately HTTP-only development configuration (not the production Secure cookie). Public hosting and the real R2 bucket require further authorization, configuration and testing.
 
-The worker command is a preflight only; it does not start a media queue. All movie API routes return 404 until the authorization and upload implementation is ready. Public launch must remain disabled.
-
-## Verification and limitations
-
-See `spike/portrait-test-notes.md` for device evidence, and `docs/phase-1-status.md` for test and setup status. Local Docker and npm installation were not available in the authoring environment. The development branch is not production-ready. Never commit real participant recordings.
+See `docs/phase-2-status.md` and `spike/portrait-test-notes.md`. Do not commit actual participant videos.
