@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --env-file-if-exists=../../.env check.mjs"
+    "check": "node --env-file-if-exists=../../.env check.mjs",
+    "dev": "node --env-file-if-exists=../../.env run.mjs"
+  },
+  "dependencies": {
+    "mongoose": "^9.0.0"
   }
 }
