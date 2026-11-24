@@ -20,8 +20,9 @@ export default function Home() {
       <p className="text-lg leading-relaxed">Record your scene, pass the last frame to a friend, and reveal the {OUTPUT.movieSeconds}-second film together.</p>
       <section className="rounded-2xl border border-[#24211e] p-4">
         <h2 className="font-bold">Development preview</h2>
-        <p className="mt-1 text-sm">Movie creation and uploads are not connected yet. The camera compatibility experiment is separate.</p>
+        <p className="mt-1 text-sm">The first-scene flow is available in local development. Invitations and final reveal are not connected yet.</p>
       </section>
+      <a href="/scene" className="ptm-primary">Test first scene locally</a>
     </main>
   );
 }
