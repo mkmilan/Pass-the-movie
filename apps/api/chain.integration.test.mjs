@@ -13,9 +13,11 @@ import { sceneCollections, ensureSceneIndexes } from '../../packages/server/scen
 import { createStorage } from '../../packages/server/storage.mjs';
 import { createApp } from './app.mjs';
 import { createSceneWorker } from '../worker/scene-worker.mjs';
+import { createAssemblyWorker } from '../worker/assembly-worker.mjs';
+import { writeFile } from 'node:fs/promises';
 
 const enabled=process.env.PTM_INTEGRATION_TEST==='1';
-test('five-scene chain: invitation races, replacement, expiry, private references and assembly handoff', {skip:!enabled,timeout:240000}, async()=>{
+test('five-scene chain: invitation races, private references, assembly, reveal and cleanup', {skip:!enabled,timeout:360000}, async()=>{
   const suffix=randomUUID().replaceAll('-',''),dbName='ptm_test_'+suffix,bucket='ptm-test-'+suffix;
   const config=singleSceneConfig({...process.env,NODE_ENV:'test',HOST:'127.0.0.1',SINGLE_SCENE_DEV_ENABLED:'true',MONGODB_URI:'mongodb://127.0.0.1:27017/'+dbName+'?replicaSet=rs0&directConnection=true',R2_BUCKET:bucket,WEB_ORIGIN:'http://127.0.0.1:3000',API_ORIGIN:'http://127.0.0.1:4000'});
   assert.ok(config);
@@ -57,7 +59,9 @@ test('five-scene chain: invitation races, replacement, expiry, private reference
     const clips=[];
     for(const [i,color] of ['red','green','blue','yellow','purple'].entries()){
       const file=join(dir,'scene-'+(i+1)+'.mp4');
-      execFileSync('ffmpeg',['-nostdin','-v','error','-y','-f','lavfi','-i','color=c='+color+':s=320x568:r=25','-t','3','-c:v','libx264','-threads','2','-an',file],{timeout:30000});
+      const audio=i===1?['-an']:['-c:a','aac','-b:a','96k'];
+      const tone=i===1?[]:['-f','lavfi','-i','sine=frequency='+ (440+110*i)+':sample_rate=48000'];
+      execFileSync('ffmpeg',['-nostdin','-v','error','-y','-f','lavfi','-i','color=c='+color+':s=320x568:r=25',...tone,'-t','3','-c:v','libx264','-threads','2',...audio,file],{timeout:30000});
       clips.push(await readFile(file));
     }
     const consent={version:'dev-1',adult:true,permissions:true,combineAndDownload:true,externalSharing:true};
@@ -136,9 +140,8 @@ test('five-scene chain: invitation races, replacement, expiry, private reference
     persisted=await collections.movies.findOne({publicId:createdMovie.publicId});
     assert.equal(persisted.status,'assembling');assert.equal(persisted.work.type,'assemble');assert.equal(persisted.work.status,'pending');
     assert.equal(persisted.slots.every(s=>s.status==='accepted'),true);
-    assert.equal(await worker.runOne(),false);
     for(const b of participants){
-      const data=await state(b);assert.equal(data.status,'assembling');assert.equal(data.canInvite,false);assert.equal(data.canReference,false);
+      const data=await state(b);assert.equal(data.status,'assembling');assert.equal(data.canInvite,false);assert.equal(data.canReference,false);assert.equal(data.canViewFinal,false);
       assert.equal((await b.call(path+'/final',{select:true})).status,404);
       assert.equal((await b.call(path+'/invite',{method:'POST',select:true,json:{}})).status,409);
       assert.equal((await b.call(path+'/scenes/6/upload',{method:'POST'})).status,404);
@@ -146,6 +149,63 @@ test('five-scene chain: invitation races, replacement, expiry, private reference
     }
     const objects=(await admin.send(new ListObjectsV2Command({Bucket:bucket}))).Contents.map(x=>x.Key);
     assert.equal(objects.length,10);assert.equal(objects.some(k=>k.includes('/raw/')),false);
+    // Failed assembly must preserve all accepted scenes and allow a bounded retry.
+    const broken=createAssemblyWorker({collections,storage,now:clock,media:{assembleMovie:async()=>{throw new Error('synthetic failure');}}});
+    assert.equal(await broken.runOne(),true);
+    persisted=await collections.movies.findOne({publicId:createdMovie.publicId});
+    assert.equal(persisted.status,'assembling');assert.equal(persisted.work.attempt,1);
+    assert.equal(persisted.work.status,'pending');assert.equal(persisted.slots.every(s=>s.status==='accepted'&&s.normalizedKey),true);
+    assert.equal((await creator.call(path+'/final',{select:true})).status,404);
+    now=new Date(now.getTime()+3000);
+    const winners=await Promise.all([worker.runOne(),worker.runOne()]);
+    assert.equal(winners.filter(Boolean).length,1);
+    persisted=await collections.movies.findOne({publicId:createdMovie.publicId});
+    assert.equal(persisted.status,'ready');assert.equal(persisted.work,null);
+    assert.equal(persisted.final.frames,450);assert.equal(persisted.final.duration,15);
+    assert.equal(persisted.expiresAt.getTime(),persisted.readyAt.getTime()+7*86400000);
+    assert.equal(persisted.slots.every(s=>s.status==='accepted'&&!s.normalizedKey&&!s.lastFrameKey),true);
+    assert.equal(await worker.runOne(),false);
+    const keys=(await admin.send(new ListObjectsV2Command({Bucket:bucket}))).Contents.map(x=>x.Key);
+    assert.deepEqual(keys,[persisted.final.key]);
+    let movieBytes;
+    for(const b of participants){
+      const data=await state(b);assert.equal(data.status,'ready');assert.equal(data.canViewFinal,true);
+      assert.equal(data.final.frames,450);assert.equal(data.final.duration,15);
+      assert.equal(JSON.stringify(data).includes(persisted.final.key),false);
+      const response=await b.call(path+'/final',{select:true});
+      assert.equal(response.status,200,await response.clone().text());assert.match(response.headers.get('content-type'),/video\/mp4/);
+      assert.match(response.headers.get('cache-control'),/no-store/);
+      const bytes=Buffer.from(await response.arrayBuffer());assert.equal(bytes.length,persisted.final.bytes);
+      if(movieBytes)assert.deepEqual(bytes,movieBytes);else movieBytes=bytes;
+    }
+    assert.equal((await anonymous.call(path+'/final')).status,401);
+    assert.equal((await oldContributor.call(path+'/final',{select:true})).status,404);
+    const ranged=await creator.call(path+'/final',{select:true,headers:{Range:'bytes=0-99'}});
+    assert.equal(ranged.status,206);assert.equal((await ranged.arrayBuffer()).byteLength,100);
+    const downloaded=await creator.call(path+'/final?download=1');
+    assert.equal(downloaded.status,200);assert.match(downloaded.headers.get('content-disposition'),/attachment.*\.mp4/);await downloaded.arrayBuffer();
+    const finalPath=join(dir,'result.mp4');await writeFile(finalPath,movieBytes);
+    const meta=JSON.parse(execFileSync('ffprobe',['-v','error','-count_frames','-show_streams','-show_format','-of','json',finalPath],{encoding:'utf8',timeout:30000}));
+    assert.equal(Number(meta.format.duration),15);
+    const video=meta.streams.find(s=>s.codec_type==='video'),audio=meta.streams.find(s=>s.codec_type==='audio');
+    assert.equal(video.codec_name,'h264');assert.equal(video.width,720);assert.equal(video.height,1280);assert.equal(Number(video.nb_read_frames),450);
+    assert.equal(audio.codec_name,'aac');assert.equal(audio.channels,2);
+    const colors=[[255,0,0],[0,128,0],[0,0,255],[255,255,0],[128,0,128]];
+    for(let i=0;i<5;i++){
+      const offset=String(i*3+1.3);
+      const rgb=execFileSync('ffmpeg',['-v','error','-ss',offset,'-i',finalPath,'-frames:v','1','-vf','crop=8:8:356:800,scale=1:1,format=rgb24','-f','rawvideo','-threads','1','-'],{timeout:30000});
+      assert.equal(rgb.length,3);
+      const distance=colors.map(c=>c.reduce((sum,v,j)=>sum+(v-rgb[j])**2,0));
+      assert.equal(distance.indexOf(Math.min(...distance)),i);
+      const pcm=execFileSync('ffmpeg',['-v','error','-ss',offset,'-i',finalPath,'-t','0.4','-vn','-ac','1','-ar','48000','-f','s16le','-'],{timeout:30000});
+      let energy=0,crossings=0,last=0;
+      for(let j=0;j<pcm.length;j+=2){const v=pcm.readInt16LE(j);energy+=v*v;if(v>0&&last<=0)crossings++;last=v;}
+      const rms=Math.sqrt(energy/(pcm.length/2));
+      if(i===1)assert.ok(rms<15,'silent scene must remain silent');
+      else {assert.ok(rms>200);assert.ok(Math.abs(crossings/0.4-(440+110*i))<15,'audio order');}
+    }
+    now=new Date(persisted.expiresAt);
+    assert.equal((await creator.call(path+'/final',{select:true})).status,410);
   }finally{
     if(server)await new Promise(resolve=>server.close(resolve));
     storage?.close();
