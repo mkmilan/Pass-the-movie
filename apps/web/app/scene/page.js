@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import CameraCapture from './camera';
+import FinalReveal from './final-reveal';
 
 const initialConsent={adult:false,permissions:false,combineAndDownload:false,externalSharing:false};
 const consentLabels={
@@ -59,7 +60,7 @@ export default function ScenePage(){
   const slot=movie?.mySlot,status=movie?.myScene.status;
   const waiting=status==='queued'||status==='uploading';
   const accepted=status==='accepted';
-  const canPoll=!!movie&&!invalid&&['collecting','assembling'].includes(movie.status);
+  const canPoll=!!movie&&!invalid&&['collecting','assembling','ready'].includes(movie.status);
   function adopt(data){const {personalToken,...state}=data;setMovie(state);if(personalToken)setPersonal(personalToken);history.replaceState(null,'',ownUrl(state));setConsent(c=>({...c,adult:true}));setJoin(null);setInvalid(false);}
   useEffect(()=>{
     active.current=true;let cancelled=false;
@@ -94,13 +95,13 @@ export default function ScenePage(){
         if(!cancelled){setMovie(data);if(!data.canInvite)setInvite(null);if(data.myScene.status==='retryable'&&waiting){setBlob(null);attempt.current=null;}}
       }catch(e){
         if(!cancelled){setError(e.message);if(['NOT_FOUND','TURN_EXPIRED','MOVIE_EXPIRED','ACCESS_REQUIRED'].includes(e.message)){terminal=true;setInvalid(true);setBlob(null);setInvite(null);setPersonal('');}}
-      }finally{inFlight=false;if(!cancelled&&!terminal)timer=setTimeout(refresh,waiting?2500:15000);}
+      }finally{inFlight=false;if(!cancelled&&!terminal)timer=setTimeout(refresh,waiting||movie.status==='assembling'?2500:15000);}
     }
     const focus=()=>{clearTimeout(timer);refresh();};
-    timer=setTimeout(refresh,waiting?1500:10000);
+    timer=setTimeout(refresh,waiting||movie.status==='assembling'?1500:10000);
     window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
     return()=>{cancelled=true;clearTimeout(timer);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
-  },[path,slot,canPoll,waiting,busy]);
+  },[path,slot,canPoll,waiting,busy,movie?.status]);
   const canReference=!!movie?.canReference&&!invalid;
   useEffect(()=>{
     if(!path||!canReference){setReference(null);return;}
@@ -151,7 +152,7 @@ export default function ScenePage(){
     await post(scoped(path+'/abandon',slot),{confirm:true});if(active.current){setInvalid(true);setBlob(null);setPersonal('');setInvite(null);setNotice('Turn abandoned.');}
   });}
   const allConsent=Object.values(consent).every(Boolean);
-  const title=join?'Continue the movie':accepted?'Scene saved!':movie?'Scene '+slot+' of 5':'Start a movie';
+  const title=join?'Continue the movie':movie?.canViewFinal?'Your movie is ready!':accepted?'Scene saved!':movie?'Scene '+slot+' of 5':'Start a movie';
   return <main className="mx-auto flex min-h-dvh max-w-[440px] flex-col gap-5 px-5 py-8">
     <header className="flex items-center justify-between"><a href="/" className="font-black">PASS THE MOVIE.</a><span className="text-xs font-bold">LOCAL DEV</span></header>
     <h1 className="text-3xl font-black">{title}</h1>
@@ -169,8 +170,8 @@ export default function ScenePage(){
         {personal?<button className="ptm-secondary" disabled={busy} onClick={()=>action(()=>copy(linkFor(movie,'access',personal)))}>Copy private link</button>:
           <button className="ptm-secondary" disabled={busy} onClick={()=>action(async()=>{const data=await post(scoped(path+'/access/rotate',slot),{});setPersonal(data.personalToken);setNotice('New private link created. Copy and keep it.');})}>Create new private link</button>}
       </details>
-      {accepted?<section className="flex flex-col gap-3">
-        <p>{movie.status==='assembling'?'All five scenes are saved. Final assembly is the next development phase.':'Your scene is saved. '+movie.slots.filter(s=>s.status==='accepted').length+' of 5 scenes accepted.'}</p>
+      {movie.canViewFinal?<FinalReveal movie={movie} apiOrigin={apiBase()}/>:accepted?<section className="flex flex-col gap-3">
+        <p>{movie.status==='assembling'?'All five scenes are saved. Your movie is being assembled.':movie.status==='failed'?'The movie could not be assembled after several attempts. Your scenes remain saved; no partial movie has been published.':'Your scene is saved. '+movie.slots.filter(s=>s.status==='accepted').length+' of 5 scenes accepted.'}</p>
         {movie.canInvite&&<button className="ptm-primary" disabled={busy} onClick={createInvite}>{invite?'Replace invitation link':'Invite next person'}</button>}
         {invite&&movie.canInvite&&<div className="rounded-xl border p-3">
           <p className="text-sm">Invitation for scene {invite.slot}. Expires {new Date(invite.expiresAt).toLocaleString()}.</p>
