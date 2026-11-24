@@ -72,10 +72,10 @@ export function createSceneUploader({collections:c,storage,now=()=>new Date()}) 
       // Queue the key for repeatable cleanup; only clear this exact reservation.
       // If the turn was replaced during object upload, schedule its unique key
       // after the storage call has settled. Never remove a successfully queued key.
-      const rollback=await c.movies.updateOne({_id:movie._id,[p+'uploadAttemptId']:attempt,[p+'generation']:grant.generation,[p+'status']:'uploading'},{$set:{[p+'status']:'retryable',[p+'rawKey']:null,[p+'errorCode']:code},$addToSet:{cleanupPending:rawKey},$inc:{revision:1}});
+      const rollback=await c.movies.updateOne({_id:movie._id,status:'collecting',activeSlot:n,[p+'uploadAttemptId']:attempt,[p+'generation']:grant.generation,[p+'status']:'uploading'},{$set:{[p+'status']:'retryable',[p+'rawKey']:null,[p+'errorCode']:code},$addToSet:{cleanupPending:rawKey},$inc:{revision:1}});
       if(rollback.modifiedCount!==1){
         const current=await c.movies.findOne({_id:movie._id});
-        if(current&&current.slots[n-1].rawKey!==rawKey)await c.movies.updateOne({_id:movie._id},{$addToSet:{cleanupPending:rawKey}});
+        if(current&&current.slots?.[n-1]?.rawKey!==rawKey)await c.movies.updateOne({_id:movie._id},{$addToSet:{cleanupPending:rawKey}});
       }
       if(e instanceof SceneError)throw e;
       fail('UPLOAD_INTERRUPTED',503);
