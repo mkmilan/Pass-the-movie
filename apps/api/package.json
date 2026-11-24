@@ -7,7 +7,7 @@
     "dev": "node --env-file-if-exists=../../.env --watch server.mjs",
     "start": "node --env-file-if-exists=../../.env server.mjs",
     "test": "node --test app.test.mjs",
-    "test:scene": "node --test scene.integration.test.mjs"
+    "test:scene": "node --test scene.integration.test.mjs chain.integration.test.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
