@@ -9,12 +9,13 @@ Mobile-first web game: every new contributor sees only the previous scene's fina
 - Phase 0: Android capture and FFmpeg mixed-format composition demonstrated; iPhone and further real-device checks remain.
 - Phase 1: JavaScript workspaces, state/config tests, Next.js/Tailwind and Express health checks.
 - Phase 2: local single-scene API, worker and storage integration passed on GitHub Actions (run 45484100532). Browser checks remain.
-- Phase 3: invitation-only chain, five ordered turns, previous-frame access, scoped sessions, turn replacement, expiry and an atomic final-assembly handoff. See `docs/phase-3-status.md` for evidence and remaining gates.
-- No final movie assembly/reveal or public launch yet. Camera experiment is separate in `spike/`.
+- Phase 3: invitation-only chain, five ordered turns, previous-frame access, scoped sessions, turn replacement, expiry and an atomic final-assembly handoff. See `docs/phase-4-status.md`, `docs/phase-3-status.md` for evidence and remaining gates.
+- Phase 4: final 15-second MP4 assembly, private reveal, local download and optional native file sharing. See `docs/phase-4-status.md`.
+- No public launch yet. Camera experiment is separate in `spike/`.
 
 ## Local development (developer-only)
 
-Prerequisites: Node 22 (22.12+), npm, Docker Compose, FFmpeg/ffprobe with H.264 and AAC encoders. Use synthetic media until deletion and public-safety controls are finished.
+Prerequisites: Node 22 (22.12+), npm, Docker Compose, FFmpeg/ffprobe with H.264, AAC and drawtext support, and DejaVu Sans Bold installed at `/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf`. Use synthetic media until deletion and public-safety controls are finished.
 
 1. Copy `.env.example` to `.env`. Set `SINGLE_SCENE_DEV_ENABLED=true`. Fill the two local R2 credential fields with non-secret dummy credentials, e.g. `local-test-user` and `local-test-password`. Never use actual cloud credentials for this local setup.
 2. Run `docker compose up -d`. MongoDB and S3Mock are bound only to loopback. S3Mock automatically creates the `ptm-local` bucket. It is a test double, not an authentication-enforcing production store. Never expose it or use it for personal recordings.
