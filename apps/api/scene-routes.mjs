@@ -1,5 +1,5 @@
 import express from 'express';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSceneAccess, movieDto, SceneError } from './scene-access.mjs';
@@ -52,7 +52,27 @@ export function createSceneRouter({config,collections,client,storage,now}) {
       res.set('Cache-Control','private, no-store');res.type('jpeg').send(image);
     }finally{await rm(dir,{recursive:true,force:true});}
   });
-  // Phase 3 exposes only the previous JPEG, never scene video or final files.
+  router.get('/movies/:id/final',async(req,res)=>{
+    function finalFor({movie,grant}){
+      if(movie.status!=='ready'||movie.slots[grant.slotNumber-1]?.status!=='accepted'||!movie.final?.key)throw new SceneError('NOT_FOUND',404);
+      return movie.final;
+    }
+    const context=await access.authorize(req),final=finalFor(context);
+    const dir=await mkdtemp(join(tmpdir(),'ptm-final-'));
+    try{
+      const path=join(dir,'final.mp4');await storage.get(final.key,path);
+      const file=await stat(path);
+      if(!file.isFile()||file.size!==final.bytes)throw new SceneError('FINAL_UNAVAILABLE',503);
+      const latest=await access.authorize(req);
+      if(latest.grant.grantId!==context.grant.grantId||latest.grant.generation!==context.grant.generation||finalFor(latest).key!==final.key)throw new SceneError('NOT_FOUND',404);
+      res.set('Cache-Control','private, no-store');
+      res.type('video/mp4');
+      if(req.query.download==='1')res.attachment('pass-the-movie-'+context.movie.publicId+'.mp4');
+      // sendFile handles byte ranges for local playback; no raw object URL is exposed.
+      await new Promise((resolve,reject)=>res.sendFile(path,{cacheControl:false,lastModified:false,acceptRanges:true},err=>err?reject(err):resolve()));
+    }finally{await rm(dir,{recursive:true,force:true});}
+  });
+  // Individual scene videos remain inaccessible.
   router.use((err,req,res,next)=>{
     if(res.headersSent)return next(err);
     if(err instanceof SceneError)return res.status(err.status).json({code:err.code});
