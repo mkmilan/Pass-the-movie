@@ -54,13 +54,13 @@ function linkFor(movie,kind,token){
   u.hash=token;return u.href;
 }
 export default function ScenePage(){
-  const [movie,setMovie]=useState(null),[personal,setPersonal]=useState(''),[invite,setInvite]=useState(null),[join,setJoin]=useState(null),[consent,setConsent]=useState(initialConsent),[blob,setBlob]=useState(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[progress,setProgress]=useState(null),[local,setLocal]=useState(false),[reference,setReference]=useState(null),[invalid,setInvalid]=useState(false);
+  const [movie,setMovie]=useState(null),[personal,setPersonal]=useState(''),[invite,setInvite]=useState(null),[join,setJoin]=useState(null),[consent,setConsent]=useState(initialConsent),[blob,setBlob]=useState(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[progress,setProgress]=useState(null),[local,setLocal]=useState(false),[reference,setReference]=useState(null),[invalid,setInvalid]=useState(false),[removalRequested,setRemovalRequested]=useState(false);
   const attempt=useRef(null),active=useRef(true);
   const path=movie?'/movies/'+encodeURIComponent(movie.publicId):null;
   const slot=movie?.mySlot,status=movie?.myScene.status;
   const waiting=status==='queued'||status==='uploading';
   const accepted=status==='accepted';
-  const canPoll=!!movie&&!invalid&&['collecting','assembling','ready'].includes(movie.status);
+  const canPoll=!!movie&&!invalid&&['collecting','assembling','ready','failed'].includes(movie.status);
   function adopt(data){const {personalToken,...state}=data;setMovie(state);if(personalToken)setPersonal(personalToken);history.replaceState(null,'',ownUrl(state));setConsent(c=>({...c,adult:true}));setJoin(null);setInvalid(false);}
   useEffect(()=>{
     active.current=true;let cancelled=false;
@@ -151,15 +151,23 @@ export default function ScenePage(){
   function abandon(){if(window.confirm('Abandon this unfinished scene? You will lose access to this turn.'))action(async()=>{
     await post(scoped(path+'/abandon',slot),{confirm:true});if(active.current){setInvalid(true);setBlob(null);setPersonal('');setInvite(null);setNotice('Turn abandoned.');}
   });}
+  function deleteMovie(){if(window.confirm('Delete the entire movie for every contributor? Access will be revoked immediately and stored video scheduled for removal. Copies already saved by other people cannot be recalled.'))action(async()=>{
+    const result=await request(scoped(path,slot),{method:'DELETE',headers:{'Content-Type':'application/json','X-CSRF-Token':movie.csrfToken},body:JSON.stringify({confirm:true})});
+    if(active.current&&result.status==='deleting'){
+      setRemovalRequested(true);setInvalid(true);setBlob(null);setPersonal('');setInvite(null);setReference(null);setMovie(null);
+      setNotice('Access revoked. Stored media is scheduled for deletion.');
+      history.replaceState(null,'','/scene');
+    }
+  });}
   const allConsent=Object.values(consent).every(Boolean);
-  const title=join?'Continue the movie':movie?.canViewFinal?'Your movie is ready!':accepted?'Scene saved!':movie?'Scene '+slot+' of 5':'Start a movie';
+  const title=removalRequested?'Movie removal requested':join?'Continue the movie':movie?.canViewFinal?'Your movie is ready!':accepted?'Scene saved!':movie?'Scene '+slot+' of 5':'Start a movie';
   return <main className="mx-auto flex min-h-dvh max-w-[440px] flex-col gap-5 px-5 py-8">
     <header className="flex items-center justify-between"><a href="/" className="font-black">PASS THE MOVIE.</a><span className="text-xs font-bold">LOCAL DEV</span></header>
     <h1 className="text-3xl font-black">{title}</h1>
     <ol aria-label="Movie progress" className="grid grid-cols-5 gap-2">{Array.from({length:5},(_,i)=><li key={i} className="rounded-lg border border-[#24211e] px-1 py-3 text-center text-xs font-bold">{movie?.slots[i].status==='accepted'?'Saved':movie?.activeSlot===i+1?(i+1)+' · 3s':i+1}</li>)}</ol>
     {notice&&<p role="status" className="text-sm">{notice}</p>}
     {error&&<p role="alert" className="rounded-xl border border-[#b63222] p-3 text-sm">Unable to continue: {error}</p>}
-    {loading?<p>Checking your session…</p>:!local?<p>This screen is only enabled for local development.</p>:invalid?<p>This turn is unavailable. Reopen your private link or ask the sender for a new invitation.</p>:!movie?<>
+    {loading?<p>Checking your session…</p>:!local?<p>This screen is only enabled for local development.</p>:invalid?<p>{removalRequested?'No participant can access this movie through the app. Previously downloaded copies cannot be recalled.':'This turn is unavailable. The movie may have expired or been deleted, or your turn may have been replaced.'}</p>:!movie?<>
       <p>{join?'Accept this turn to see the last frame of the previous scene.':'Five friends. Three seconds each.'} The completed movie will be downloadable by its contributors and may be shared externally.</p>
       <label className="flex items-center gap-2"><input type="checkbox" checked={consent.adult} onChange={e=>setConsent({...consent,adult:e.target.checked})}/> I am 18 or older.</label>
       <button className="ptm-primary" disabled={!consent.adult||busy} onClick={join?accept:start}>{join?'Accept turn':'Start a movie'}</button>
@@ -188,8 +196,10 @@ export default function ScenePage(){
         <button className="ptm-primary" disabled={busy||!allConsent||!blob||(slot>1&&!reference)} onClick={submit}>Use this scene</button>
         {progress!==null&&<div role="status">Uploading… {progress}%<progress className="w-full" max="100" value={progress}/></div>}
       </>}
-      {movie.canAbandon&&<button className="ptm-secondary" disabled={busy} onClick={abandon}>Abandon unfinished turn</button>}
+      {movie.canDelete&&<button className="ptm-secondary border-[#b63222] text-[#b63222]" disabled={busy} onClick={deleteMovie}>Delete entire movie</button>}
+      {movie.canAbandon&&movie.role!=='creator'&&<button className="ptm-secondary" disabled={busy} onClick={abandon}>Abandon unfinished turn</button>}
       <p className="text-xs">Synthetic local test only. No public sharing or automatic social posting.</p>
     </>}
+    <footer className="flex flex-wrap gap-4 text-xs"><a href="/privacy" className="underline">Privacy and recording rules</a><a href={movie?'/report?movie='+encodeURIComponent(movie.publicId):'/report'} className="underline">Report a concern</a></footer>
   </main>;
 }
