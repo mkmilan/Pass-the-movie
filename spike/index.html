@@ -1,75 +1,82 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pass the Movie · camera test</title>
+<title>Pass the Movie · portrait camera test</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#fff9f0;color:#24211e;font:16px system-ui,sans-serif}main{max-width:440px;margin:auto;padding:20px}h1{margin:4px 0;font-size:2rem}video{display:block;width:100%;aspect-ratio:9/16;max-height:48vh;object-fit:contain;background:#24211e;border-radius:16px;margin:12px 0}button{font:inherit;padding:12px;border:1px solid #24211e;border-radius:12px;background:white;color:#24211e;min-height:44px}button:disabled{opacity:.5}#record{background:#b63222;color:white;border:none;font-weight:bold;flex:1}section{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}label{display:flex;gap:8px;align-items:center;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}a{color:#9e3022;font-weight:bold}[hidden]{display:none!important}
+*{box-sizing:border-box}body{margin:0;background:#fff9f0;color:#24211e;font:16px system-ui,sans-serif}main{max-width:440px;margin:auto;padding:20px}h1{margin:4px 0;font-size:2rem}.frame{position:relative;width:min(100%,32vh);aspect-ratio:9/16;margin:12px auto;background:#24211e;border-radius:16px;overflow:hidden}video{display:block;width:100%;height:100%;object-fit:contain}#preview{object-fit:cover}button{font:inherit;padding:12px;border:1px solid #24211e;border-radius:12px;background:white;color:#24211e;min-height:44px}button:disabled{opacity:.5}#record{background:#b63222;color:white;border:none;font-weight:bold;flex:1}section{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}label{display:flex;gap:8px;align-items:center;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}a{color:#9e3022;font-weight:bold}[hidden]{display:none!important}
 </style>
 <main>
-<small>PHASE 0 / DEVICE COMPATIBILITY</small><h1>Pass the Movie.</h1><p>Record three seconds. Review and save the original file. Nothing is uploaded.</p>
-<video id="preview" autoplay muted playsinline hidden></video><video id="review" controls playsinline hidden></video>
+<small>PHASE 0 / PORTRAIT TEST V2</small><h1>Pass the Movie.</h1><p>Record three seconds in a vertical frame. The visible framing is what you record. Nothing is uploaded.</p>
+<div class="frame" id="live" hidden><video id="preview" autoplay muted playsinline></video></div><div class="frame" id="playback" hidden><video id="review" controls playsinline></video></div>
 <section><button id="camera">Open camera</button><button id="flip" disabled>Flip camera</button><label><input id="mic" type="checkbox">Microphone</label></section>
 <section><button id="record" disabled>Record 3s</button><button id="retake" disabled>Retake</button></section>
-<p id="status" role="status" aria-live="polite">Tap Open camera to begin.</p><a id="save" hidden>Save original clip</a><pre id="details"></pre>
+<p id="status" role="status" aria-live="polite">Tap Open camera to begin.</p><a id="save" hidden>Save video</a><pre id="details"></pre>
 </main><script>
 'use strict';
-const $ = id => document.getElementById(id);
-const preview = $('preview'), review = $('review');
-let stream, recorder, url, timer, started, invalid, busy=false, facing='user', mode='idle', requestId=0;
-const status = message => $('status').textContent=message;
-const choices = audio => audio ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/mp4','video/webm',''] : ['video/mp4;codecs=avc1.42E01E','video/webm;codecs=vp8','video/webm;codecs=vp9','video/mp4','video/webm',''];
-function controls(){
-  const locked=busy || mode==='recording';
-  $('camera').disabled=locked || mode==='review'; $('flip').disabled=locked || !stream || mode!=='preview';
-  $('mic').disabled=locked || mode==='review'; $('record').disabled=locked || mode!=='preview'; $('retake').disabled=locked || mode!=='review';
-}
-function stopTracks(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;preview.srcObject=null;preview.hidden=true;}
-function clearReview(){review.pause();review.removeAttribute('src');review.load();review.hidden=true;$('save').hidden=true;$('save').removeAttribute('href');if(url)URL.revokeObjectURL(url);url=null;$('details').textContent='';}
-function cancelTake(reason){invalid=reason;if(recorder?.state==='recording'){clearTimeout(timer);recorder.stop();}}
+const $=id=>document.getElementById(id), preview=$('preview'), review=$('review');
+const W=720,H=1280;
+let stream,recordStream,recorder,url,timer,raf,started,stopped,invalid,busy=false,facing='user',mode='idle',requestId=0,sourceSize,recordPath;
+const status=message=>$('status').textContent=message;
+const choices=audio=>audio?['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/mp4','video/webm','']:['video/mp4;codecs=avc1.42E01E','video/webm;codecs=vp8','video/webm;codecs=vp9','video/mp4','video/webm',''];
+function controls(){const locked=busy||mode==='recording';$('camera').disabled=locked||mode==='review';$('flip').disabled=locked||!stream||mode!=='preview';$('mic').disabled=locked||mode==='review';$('record').disabled=locked||mode!=='preview';$('retake').disabled=locked||mode!=='review';}
+function stopRecordingStream(){cancelAnimationFrame(raf);raf=null;if(recordStream&&recordStream!==stream)recordStream.getVideoTracks().forEach(t=>t.stop());recordStream=null;}
+function stopTracks(){stopRecordingStream();if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;preview.srcObject=null;$('live').hidden=true;}
+function clearReview(){review.onloadedmetadata=null;review.onerror=null;review.pause();review.removeAttribute('src');review.load();$('playback').hidden=true;$('save').hidden=true;$('save').removeAttribute('href');if(url)URL.revokeObjectURL(url);url=null;$('details').textContent='';}
+function stopTake(){clearTimeout(timer);stopped=performance.now();if(recorder?.state==='recording')recorder.stop();}
+function cancelTake(reason){invalid=reason;if(recorder?.state==='recording')stopTake();}
+function isPortrait(w,h){return w>0&&h>0&&Math.abs(w/h-W/H)<0.02;}
+function updateFraming(){if(mode!=='preview')return;const w=preview.videoWidth,h=preview.videoHeight;if(!w||!h)return;const crop=!isPortrait(w,h),canCrop=typeof HTMLCanvasElement.prototype.captureStream==='function';preview.style.objectFit=crop&&!canCrop?'contain':'cover';status(crop?(canCrop?'Ready. Landscape camera will be center-cropped to the visible portrait frame.':'Portrait conversion unavailable here; this test saves the native camera format.'):'Ready. Portrait camera detected.');}
 async function openCamera(){
-  if(busy || mode==='recording')return;
-  if(!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder){status('Camera recording needs HTTPS or localhost. Try Safari or Chrome.');return;}
+  if(busy||mode==='recording')return;
+  if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){status('Camera recording needs HTTPS or localhost. Try Safari or Chrome.');return;}
   const id=++requestId;busy=true;stopTracks();clearReview();mode='idle';controls();
-  const constraints={video:{facingMode:{ideal:facing},width:{ideal:720},height:{ideal:1280},frameRate:{ideal:30,max:60}},audio:$('mic').checked};
+  const constraints={video:{facingMode:{ideal:facing},width:{ideal:720},height:{ideal:1280},aspectRatio:{ideal:9/16},frameRate:{ideal:30,max:60},resizeMode:'crop-and-scale'},audio:$('mic').checked};
   try{
-    try{stream=await navigator.mediaDevices.getUserMedia(constraints);}
-    catch(error){if(!constraints.audio)throw error;stream=await navigator.mediaDevices.getUserMedia({...constraints,audio:false});$('mic').checked=false;}
-    if(id!==requestId || document.hidden){stopTracks();return;}
-    stream.getVideoTracks()[0].addEventListener('ended',()=>{if(mode==='recording')cancelTake('Camera disconnected.');else if(mode==='preview'){stopTracks();mode='idle';status('Camera disconnected. Open it again.');controls();}},{once:true});
-    preview.srcObject=stream;preview.hidden=false;await preview.play();
-    if(id!==requestId || document.hidden){stopTracks();return;}
-    mode='preview';status(stream.getAudioTracks().length?'Ready with microphone.':'Ready without microphone.');
+    try{stream=await navigator.mediaDevices.getUserMedia(constraints);}catch(error){if(!constraints.audio)throw error;stream=await navigator.mediaDevices.getUserMedia({...constraints,audio:false});$('mic').checked=false;}
+    if(id!==requestId||document.hidden){stopTracks();return;}
+    stream.getTracks().forEach(t=>t.addEventListener('ended',()=>{if(mode==='recording')cancelTake('Camera or microphone disconnected.');else if(mode==='preview'){stopTracks();mode='idle';status('Camera disconnected. Open it again.');controls();}},{once:true}));
+    preview.srcObject=stream;$('live').hidden=false;await preview.play();
+    if(id!==requestId||document.hidden){stopTracks();return;}
+    mode='preview';updateFraming();
   }catch(error){stopTracks();mode='idle';status('Camera unavailable. Check permissions or try another browser.');}
   finally{busy=false;controls();}
 }
+function cropRect(w,h){const ratio=W/H;return w/h>ratio?{x:(w-h*ratio)/2,y:0,w:h*ratio,h}:{x:0,y:(h-w/ratio)/2,w,h:w/ratio};}
+function prepareStream(){
+  const w=preview.videoWidth,h=preview.videoHeight;if(!w||!h)throw Error('Camera is not ready. Open it again.');sourceSize=[w,h];
+  if(isPortrait(w,h)){recordPath='native portrait';return stream;}
+  if(typeof HTMLCanvasElement.prototype.captureStream!=='function'){recordPath='native fallback';return stream;}
+  const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw Error('Portrait conversion unavailable.');
+  const draw=()=>{const sw=preview.videoWidth,sh=preview.videoHeight;if(!sw||!sh||sw!==w||sh!==h){cancelTake('Camera orientation changed. Retake in portrait.');return;}const c=cropRect(sw,sh);ctx.drawImage(preview,c.x,c.y,c.w,c.h,0,0,W,H);};
+  draw();const captured=canvas.captureStream(30);captured.getAudioTracks().forEach(t=>t.stop());stream.getAudioTracks().forEach(t=>captured.addTrack(t));recordPath='portrait canvas';
+  let last=0;const loop=now=>{if(now-last>=1000/30-2){draw();last=now;}if(mode==='recording'&&!invalid)raf=requestAnimationFrame(loop);};raf=requestAnimationFrame(loop);return captured;
+}
 function finishError(message){clearTimeout(timer);recorder=null;stopTracks();mode='idle';status(message);controls();}
 function record(){
-  if(!stream || mode!=='preview' || busy)return;
-  invalid='';mode='recording';controls();
-  const audio=stream.getAudioTracks().length>0,settings=stream.getVideoTracks()[0].getSettings();
+  if(!stream||mode!=='preview'||busy)return;invalid='';mode='recording';controls();
+  try{recordStream=prepareStream();}catch(error){finishError(error.message||'Portrait conversion failed.');return;}
+  const audio=recordStream.getAudioTracks().length>0,settings=stream.getVideoTracks()[0].getSettings();
   for(const type of choices(audio)){
-    if(type && !MediaRecorder.isTypeSupported(type))continue;
+    if(type&&!MediaRecorder.isTypeSupported(type))continue;
     try{
-      const r=new MediaRecorder(stream,{...(type?{mimeType:type}:{}),videoBitsPerSecond:2500000,...(audio?{audioBitsPerSecond:96000}:{})});
-      const chunks=[];recorder=r;
+      const r=new MediaRecorder(recordStream,{...(type?{mimeType:type}:{}),videoBitsPerSecond:2500000,...(audio?{audioBitsPerSecond:96000}:{})});const chunks=[];recorder=r;
       r.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
       r.onerror=()=>{if(recorder===r){invalid='Recording failed.';if(r.state==='recording')cancelTake(invalid);else finishError(invalid);}};
       r.onstop=()=>{
-        if(recorder!==r)return;
-        clearTimeout(timer);const elapsed=performance.now()-started;recorder=null;stopTracks();
-        const mime=r.mimeType || chunks[0]?.type || '',blob=new Blob(chunks,{type:mime});
-        if(invalid || elapsed<2700 || elapsed>3500 || !blob.size || blob.size>12*1024*1024 || !/^video\/(mp4|webm)(;|$)/i.test(mime)){finishError(invalid || 'Invalid timing, size or format. Please retry.');return;}
-        url=URL.createObjectURL(blob);review.src=url;review.hidden=false;$('save').href=url;$('save').download='scene.'+(mime.includes('mp4')?'mp4':'webm');$('save').hidden=false;
-        $('details').textContent=JSON.stringify({mime,bytes:blob.size,elapsedMs:Math.round(elapsed),audio,settings},null,2);mode='review';status('Review your take, then save the original file.');controls();
+        if(recorder!==r)return;clearTimeout(timer);const elapsed=(stopped||performance.now())-started;recorder=null;stopTracks();
+        const mime=r.mimeType||chunks[0]?.type||'',blob=new Blob(chunks,{type:mime});
+        if(invalid||elapsed<2700||elapsed>3500||!blob.size||blob.size>12*1024*1024||!/^video\/(mp4|webm)(;|$)/i.test(mime)){finishError(invalid||'Invalid timing, size or format. Please retry.');return;}
+        const details={mime,bytes:blob.size,elapsedMs:Math.round(elapsed),audio,path:recordPath,source:{width:sourceSize[0],height:sourceSize[1],frameRate:settings.frameRate,facingMode:settings.facingMode}};
+        url=URL.createObjectURL(blob);review.onloadedmetadata=()=>{details.recorded={width:review.videoWidth,height:review.videoHeight,duration: Number.isFinite(review.duration)?review.duration:null};$('details').textContent=JSON.stringify(details,null,2);status(isPortrait(review.videoWidth,review.videoHeight)?'Portrait recording ready. Review and save.':'Native recording is not portrait. Save for diagnosis or retake.');};review.onerror=()=>status('Local playback failed. Save the file for diagnosis or retake.');review.src=url;$('playback').hidden=false;$('save').href=url;$('save').download='scene.'+(mime.includes('mp4')?'mp4':'webm');$('save').hidden=false;$('details').textContent=JSON.stringify(details,null,2);mode='review';status('Review your take, then save the video.');controls();
       };
-      r.start();started=performance.now();status('Recording… 3 seconds');timer=setTimeout(()=>{if(r.state==='recording')r.stop();},3000);return;
+      r.start();started=performance.now();stopped=0;status('Recording… 3 seconds');timer=setTimeout(stopTake,3000);return;
     }catch(error){if(recorder){recorder.onstop=null;recorder.onerror=null;recorder.ondataavailable=null;}recorder=null;}
   }
-  finishError('No supported recording format. Try another browser.');
+  finishError('No supported recording format for this camera. Try another browser.');
 }
 $('camera').onclick=openCamera;$('flip').onclick=()=>{facing=facing==='user'?'environment':'user';openCamera();};$('mic').onchange=()=>{if(mode==='preview')openCamera();};$('record').onclick=record;$('retake').onclick=()=>{mode='idle';openCamera();};
+preview.addEventListener('resize',()=>{if(mode==='recording'&&sourceSize&&(preview.videoWidth!==sourceSize[0]||preview.videoHeight!==sourceSize[1]))cancelTake('Camera orientation changed. Retake in portrait.');else updateFraming();});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(mode==='recording')cancelTake('Recording interrupted.');else if(mode==='preview'){stopTracks();mode='idle';controls();status('Camera paused. Open it again.');}}});
 window.addEventListener('orientationchange',()=>{if(mode==='recording')cancelTake('Keep your phone orientation steady.');});
-window.addEventListener('pagehide',()=>{++requestId;cancelTake('Page closed.');stopTracks();clearReview();});
-controls();
+window.addEventListener('pagehide',()=>{++requestId;cancelTake('Page closed.');stopTracks();clearReview();});controls();
 </script></html>
