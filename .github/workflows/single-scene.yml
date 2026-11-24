@@ -7,6 +7,7 @@ on:
       - "packages/**"
       - "package.json"
       - "docker-compose.yml"
+      - "docs/**"
       - ".github/workflows/single-scene.yml"
 permissions:
   contents: read
@@ -46,7 +47,7 @@ jobs:
           done
           docker compose exec -T mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'
           for i in $(seq 1 40); do
-            if docker compose exec -T mongo mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' && curl --fail --silent http://127.0.0.1:9000/minio/health/ready; then exit 0; fi
+            if docker compose exec -T mongo mongosh --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' && curl --fail --silent http://127.0.0.1:9000/favicon.ico; then exit 0; fi
             sleep 2
           done
           exit 1
