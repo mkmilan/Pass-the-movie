@@ -8,8 +8,9 @@ Mobile-first web game: every new contributor sees only the previous scene's fina
 
 - Phase 0: Android capture and FFmpeg mixed-format composition demonstrated; iPhone and further real-device checks remain.
 - Phase 1: JavaScript workspaces, state/config tests, Next.js/Tailwind and Express health checks.
-- Phase 2: local-only movie creation, creator recovery, consent, recording/review, bounded idempotent upload, private storage adapter, leased normalization and last-frame extraction. Integration and browser checks are release gates.
-- No invitation flow, final reveal or public launch yet. Camera experiment is separate in `spike/`.
+- Phase 2: local single-scene API, worker and storage integration passed on GitHub Actions (run 45484100532). Browser checks remain.
+- Phase 3: invitation-only chain, five ordered turns, previous-frame access, scoped sessions, turn replacement, expiry and an atomic final-assembly handoff. See `docs/phase-3-status.md` for evidence and remaining gates.
+- No final movie assembly/reveal or public launch yet. Camera experiment is separate in `spike/`.
 
 ## Local development (developer-only)
 
@@ -25,4 +26,4 @@ Prerequisites: Node 22 (22.12+), npm, Docker Compose, FFmpeg/ffprobe with H.264 
 
 The single-scene routes and worker fail closed outside localhost or when production mode is selected. The current local cookie is deliberately HTTP-only development configuration (not the production Secure cookie). Public hosting and the real R2 bucket require further authorization, configuration and testing.
 
-See `docs/phase-2-status.md` and `spike/portrait-test-notes.md`. Do not commit actual participant videos.
+See `docs/phase-3-status.md`, `docs/phase-2-status.md` and `spike/portrait-test-notes.md`. Do not commit actual participant videos.
