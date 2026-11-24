@@ -48,13 +48,26 @@ export function createMediaProcessor({ffmpeg='ffmpeg',ffprobe='ffprobe',timeoutM
     const out=await run(ffprobe,['-v','error',...(restricted?inputLimits:[]),'-threads','2',...options,'-of','json',path],'MEDIA_INVALID');
     try{return JSON.parse(out);}catch{reject('MEDIA_INVALID');}
   }
-  async function verifyScene(path) {
+  async function verifyOutput(path, seconds) {
     const info=await probe(path,['-count_frames','-show_format','-show_streams']);
     const v=info.streams?.find(s=>s.codec_type==='video'), a=info.streams?.find(s=>s.codec_type==='audio');
-    if(info.streams?.length!==2||!v||!a||v.codec_name!=='h264'||v.width!==720||v.height!==1280||v.pix_fmt!=='yuv420p'||v.sample_aspect_ratio!=='1:1'||rate(v.avg_frame_rate)!==30||Number(v.nb_read_frames)!==90||v.side_data_list?.some(x=>finite(x.rotation))||a.codec_name!=='aac'||Number(a.sample_rate)!==48000||a.channels!==2||!finite(info.format?.duration)||Math.abs(Number(info.format.duration)-3)>.05||[v,a].some(s=>!finite(s.start_time)||Math.abs(Number(s.start_time))>.001)) reject('MEDIA_OUTPUT_INVALID');
+    if(info.streams?.length!==2||!v||!a||v.codec_name!=='h264'||v.width!==720||v.height!==1280||v.pix_fmt!=='yuv420p'||v.sample_aspect_ratio!=='1:1'||rate(v.avg_frame_rate)!==30||Number(v.nb_read_frames)!==seconds*R.fps||v.side_data_list?.some(x=>finite(x.rotation))||a.codec_name!=='aac'||Number(a.sample_rate)!==48000||a.channels!==2||!finite(info.format?.duration)||Math.abs(Number(info.format.duration)-seconds)>.05||[v,a].some(s=>!finite(s.start_time)||Math.abs(Number(s.start_time))>.001)) reject('MEDIA_OUTPUT_INVALID');
     const file=await stat(path); if(file.size<=0||file.size>R.maxUploadBytes) reject('MEDIA_OUTPUT_INVALID');
     await run(ffmpeg,['-nostdin','-hide_banner','-v','error','-xerror',...inputLimits,'-threads','2','-i',path,'-f','null','-'],'MEDIA_OUTPUT_INVALID');
-    return {width:720,height:1280,frames:90,duration:3,codec:'h264',audioCodec:'aac',bytes:file.size};
+    return {width:720,height:1280,frames:seconds*R.fps,duration:seconds,codec:'h264',audioCodec:'aac',bytes:file.size};
+  }
+  const verifyScene=path=>verifyOutput(path,R.sceneSeconds);
+  const verifyMovie=path=>verifyOutput(path,R.sceneCount*R.sceneSeconds);
+  async function assembleMovie(inputs,dir,{brand=true}={}) {
+    if(!Array.isArray(inputs)||inputs.length!==R.sceneCount)reject('MOVIE_SCENE_COUNT');
+    const sources=inputs.map(p=>resolve(p)),final=join(resolve(dir),'final.mp4');
+    if(sources.includes(final))reject('MEDIA_INVALID');
+    for(const path of sources)await verifyScene(path);
+    const graph=sources.map((_,i)=>'['+i+':v]setpts=PTS-STARTPTS[v'+i+'];['+i+':a]apad,atrim=end_sample=144000,asetpts=N/SR/TB[a'+i+']').join(';')+';'+sources.map((_,i)=>'[v'+i+'][a'+i+']').join('')+'concat=n=5:v=1:a=1[v0out][a]'+(brand?";[v0out]drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='PASS THE MOVIE':fontsize=25:fontcolor=white:box=1:boxcolor=black@0.55:boxborderw=9:x=(w-tw)/2:y=112[v]":";[v0out]null[v]");
+    const inputArgs=sources.flatMap(path=>[...inputLimits,'-threads','2','-i',path]);
+    await run(ffmpeg,['-nostdin','-hide_banner','-v','error','-xerror','-y','-filter_threads','2','-filter_complex_threads','2',...inputArgs,'-filter_complex',graph,'-map','[v]','-map','[a]','-r','30','-fps_mode','cfr','-t',String(R.sceneCount*R.sceneSeconds),'-c:v','libx264','-preset','veryfast','-crf','23','-maxrate','3M','-bufsize','6M','-threads','2','-pix_fmt','yuv420p','-color_range','tv','-c:a','aac','-b:a','96k','-ar','48000','-ac','2','-map_metadata','-1','-map_chapters','-1','-movflags','+faststart',final]);
+    const summary=await verifyMovie(final);
+    return {final,summary};
   }
   async function normalizeScene(input,dir) {
     const src=resolve(input), dest=resolve(dir), scene=join(dest,'scene.mp4'), still=join(dest,'last.jpg');
@@ -73,5 +86,5 @@ export function createMediaProcessor({ffmpeg='ffmpeg',ffprobe='ffprobe',timeoutM
     if(image.streams?.length!==1||frame?.codec_name!=='mjpeg'||frame.width!==720||frame.height!==1280||Number(frame.nb_read_frames)!==1) reject('MEDIA_OUTPUT_INVALID');
     return {scene,still,summary};
   }
-  return {normalizeScene,verifyScene};
+  return {normalizeScene,verifyScene,assembleMovie,verifyMovie};
 }
