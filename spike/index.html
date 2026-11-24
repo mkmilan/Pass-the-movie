@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pass the Movie · camera test</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#fff9f0;color:#24211e;font:16px system-ui,sans-serif}main{max-width:440px;margin:auto;padding:20px}h1{margin:4px 0;font-size:2rem}video{display:block;width:100%;aspect-ratio:9/16;max-height:48vh;object-fit:contain;background:#24211e;border-radius:16px;margin:12px 0}button{font:inherit;padding:12px;border:1px solid #24211e;border-radius:12px;background:white;color:#24211e;min-height:44px}button:disabled{opacity:.5}#record{background:#b63222;color:white;border:none;font-weight:bold;flex:1}section{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}label{display:flex;gap:8px;align-items:center;min-height:44px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}a{color:#9e3022;font-weight:bold}[hidden]{display:none!important}
+</style>
+<main>
+<small>PHASE 0 / DEVICE COMPATIBILITY</small><h1>Pass the Movie.</h1><p>Record three seconds. Review and save the original file. Nothing is uploaded.</p>
+<video id="preview" autoplay muted playsinline hidden></video><video id="review" controls playsinline hidden></video>
+<section><button id="camera">Open camera</button><button id="flip" disabled>Flip camera</button><label><input id="mic" type="checkbox">Microphone</label></section>
+<section><button id="record" disabled>Record 3s</button><button id="retake" disabled>Retake</button></section>
+<p id="status" role="status" aria-live="polite">Tap Open camera to begin.</p><a id="save" hidden>Save original clip</a><pre id="details"></pre>
+</main><script>
+'use strict';
+const $ = id => document.getElementById(id);
+const preview = $('preview'), review = $('review');
+let stream, recorder, url, timer, started, invalid, busy=false, facing='user', mode='idle', requestId=0;
+const status = message => $('status').textContent=message;
+const choices = audio => audio ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/mp4','video/webm',''] : ['video/mp4;codecs=avc1.42E01E','video/webm;codecs=vp8','video/webm;codecs=vp9','video/mp4','video/webm',''];
+function controls(){
+  const locked=busy || mode==='recording';
+  $('camera').disabled=locked || mode==='review'; $('flip').disabled=locked || !stream || mode!=='preview';
+  $('mic').disabled=locked || mode==='review'; $('record').disabled=locked || mode!=='preview'; $('retake').disabled=locked || mode!=='review';
+}
+function stopTracks(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;preview.srcObject=null;preview.hidden=true;}
+function clearReview(){review.pause();review.removeAttribute('src');review.load();review.hidden=true;$('save').hidden=true;$('save').removeAttribute('href');if(url)URL.revokeObjectURL(url);url=null;$('details').textContent='';}
+function cancelTake(reason){invalid=reason;if(recorder?.state==='recording'){clearTimeout(timer);recorder.stop();}}
+async function openCamera(){
+  if(busy || mode==='recording')return;
+  if(!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || !window.MediaRecorder){status('Camera recording needs HTTPS or localhost. Try Safari or Chrome.');return;}
+  const id=++requestId;busy=true;stopTracks();clearReview();mode='idle';controls();
+  const constraints={video:{facingMode:{ideal:facing},width:{ideal:720},height:{ideal:1280},frameRate:{ideal:30,max:60}},audio:$('mic').checked};
+  try{
+    try{stream=await navigator.mediaDevices.getUserMedia(constraints);}
+    catch(error){if(!constraints.audio)throw error;stream=await navigator.mediaDevices.getUserMedia({...constraints,audio:false});$('mic').checked=false;}
+    if(id!==requestId || document.hidden){stopTracks();return;}
+    stream.getVideoTracks()[0].addEventListener('ended',()=>{if(mode==='recording')cancelTake('Camera disconnected.');else if(mode==='preview'){stopTracks();mode='idle';status('Camera disconnected. Open it again.');controls();}},{once:true});
+    preview.srcObject=stream;preview.hidden=false;await preview.play();
+    if(id!==requestId || document.hidden){stopTracks();return;}
+    mode='preview';status(stream.getAudioTracks().length?'Ready with microphone.':'Ready without microphone.');
+  }catch(error){stopTracks();mode='idle';status('Camera unavailable. Check permissions or try another browser.');}
+  finally{busy=false;controls();}
+}
+function finishError(message){clearTimeout(timer);recorder=null;stopTracks();mode='idle';status(message);controls();}
+function record(){
+  if(!stream || mode!=='preview' || busy)return;
+  invalid='';mode='recording';controls();
+  const audio=stream.getAudioTracks().length>0,settings=stream.getVideoTracks()[0].getSettings();
+  for(const type of choices(audio)){
+    if(type && !MediaRecorder.isTypeSupported(type))continue;
+    try{
+      const r=new MediaRecorder(stream,{...(type?{mimeType:type}:{}),videoBitsPerSecond:2500000,...(audio?{audioBitsPerSecond:96000}:{})});
+      const chunks=[];recorder=r;
+      r.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
+      r.onerror=()=>{if(recorder===r){invalid='Recording failed.';if(r.state==='recording')cancelTake(invalid);else finishError(invalid);}};
+      r.onstop=()=>{
+        if(recorder!==r)return;
+        clearTimeout(timer);const elapsed=performance.now()-started;recorder=null;stopTracks();
+        const mime=r.mimeType || chunks[0]?.type || '',blob=new Blob(chunks,{type:mime});
+        if(invalid || elapsed<2700 || elapsed>3500 || !blob.size || blob.size>12*1024*1024 || !/^video\/(mp4|webm)(;|$)/i.test(mime)){finishError(invalid || 'Invalid timing, size or format. Please retry.');return;}
+        url=URL.createObjectURL(blob);review.src=url;review.hidden=false;$('save').href=url;$('save').download='scene.'+(mime.includes('mp4')?'mp4':'webm');$('save').hidden=false;
+        $('details').textContent=JSON.stringify({mime,bytes:blob.size,elapsedMs:Math.round(elapsed),audio,settings},null,2);mode='review';status('Review your take, then save the original file.');controls();
+      };
+      r.start();started=performance.now();status('Recording… 3 seconds');timer=setTimeout(()=>{if(r.state==='recording')r.stop();},3000);return;
+    }catch(error){if(recorder){recorder.onstop=null;recorder.onerror=null;recorder.ondataavailable=null;}recorder=null;}
+  }
+  finishError('No supported recording format. Try another browser.');
+}
+$('camera').onclick=openCamera;$('flip').onclick=()=>{facing=facing==='user'?'environment':'user';openCamera();};$('mic').onchange=()=>{if(mode==='preview')openCamera();};$('record').onclick=record;$('retake').onclick=()=>{mode='idle';openCamera();};
+document.addEventListener('visibilitychange',()=>{if(document.hidden){if(mode==='recording')cancelTake('Recording interrupted.');else if(mode==='preview'){stopTracks();mode='idle';controls();status('Camera paused. Open it again.');}}});
+window.addEventListener('orientationchange',()=>{if(mode==='recording')cancelTake('Keep your phone orientation steady.');});
+window.addEventListener('pagehide',()=>{++requestId;cancelTake('Page closed.');stopTracks();clearReview();});
+controls();
+</script></html>
