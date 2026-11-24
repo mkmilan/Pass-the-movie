@@ -5,11 +5,13 @@ import { join } from 'node:path';
 import { createMediaProcessor, MediaError } from './media.mjs';
 import { activeSlot, slotPath, resetSlotPatch } from '../../packages/server/turns.mjs';
 import { GAME_RULES as R } from '../../packages/shared/rules.mjs';
+import { createAssemblyWorker } from './assembly-worker.mjs';
 
 const MAX_ATTEMPTS=3, LEASE_MS=240000;
 const permanent=new Set(['MEDIA_INVALID','MEDIA_UNSUPPORTED','MEDIA_DURATION','MEDIA_AV_OFFSET','MEDIA_TOO_LARGE']);
 const updateScope=(movie,t)=>({_id:movie._id,revision:movie.revision,status:'collecting',activeSlot:movie.work.slot,expiresAt:{$gt:t},[slotPath(movie.work.slot)+'status']:'queued',[slotPath(movie.work.slot)+'generation']:movie.work.generation,'work.jobId':movie.work.jobId,'work.leaseId':movie.work.leaseId,'work.status':'running','work.leaseUntil':{$gt:t}});
 export function createSceneWorker({collections:{movies,grants},storage,media=createMediaProcessor(),now=()=>new Date()}) {
+  const assembly=createAssemblyWorker({collections:{movies},storage,media,now});
   async function claim() {
     const t=now(),leaseId=randomUUID();
     return movies.findOneAndUpdate({status:'collecting',activeSlot:{$gte:1,$lte:R.sceneCount},expiresAt:{$gt:t},'slots.status':'queued','work.type':'normalize',$expr:{$eq:['$activeSlot','$work.slot']},'work.attempt':{$lt:MAX_ATTEMPTS},$or:[{'work.status':'pending','work.nextRunAt':{$lte:t}},{'work.status':'running','work.leaseUntil':{$lte:t}}]},{$set:{'work.status':'running','work.leaseId':leaseId,'work.leaseUntil':new Date(t.getTime()+LEASE_MS)},$inc:{'work.attempt':1,revision:1}},{sort:{'work.nextRunAt':1},returnDocument:'after'});
@@ -52,7 +54,7 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
   }
   async function runOne() {
     await sweep();
-    const m=await claim();if(!m)return false;
+    const m=await claim();if(!m){const didWork=await assembly.runOne();if(didWork)await cleanOne();return didWork;}
     const job=m.work,n=job.slot,p=slotPath(n),raw=m.slots[n-1].rawKey,base='movies/'+m.publicId+'/',suffix=job.jobId+'/'+job.leaseId;
     const normalizedKey=base+'normalized/'+n+'/'+suffix+'.mp4',lastFrameKey=base+'frames/'+n+'/'+suffix+'.jpg';
     let dir,accepted=false,lost=false,heartbeatBusy=false;
