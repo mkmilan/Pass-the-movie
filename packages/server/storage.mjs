@@ -14,7 +14,7 @@ export function createStorage(config) {
   const bucket=config.bucket;
   const send=command=>client.send(command,{abortSignal:AbortSignal.timeout(20000)});
   function keyCheck(key) {
-    if(typeof key!=='string'||!/^movies\/[a-zA-Z0-9-]+\/(?:raw|normalized|frames)\/[1-5]\/[a-zA-Z0-9./-]+$/.test(key)||key.includes('..')) throw new Error('STORAGE_KEY_INVALID');
+    if(typeof key!=='string'||!/^movies\/[a-zA-Z0-9-]+\/(?:(?:raw|normalized|frames)\/[1-5]\/|final\/)[a-zA-Z0-9./-]+$/.test(key)||key.includes('..')) throw new Error('STORAGE_KEY_INVALID');
   }
   return {
     async ready(){ await send(new HeadBucketCommand({Bucket:bucket})); },
