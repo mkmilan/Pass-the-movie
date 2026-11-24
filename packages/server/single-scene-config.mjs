@@ -14,5 +14,6 @@ export function singleSceneConfig(env) {
   if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(env.R2_BUCKET || '') || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) throw new Error('R2_LOCAL_CONFIG_REQUIRED');
   // The database can only be a loopback, local replica set in this stage.
   if (!/^mongodb:\/\/(localhost|127\.0\.0\.1):27017\/[a-zA-Z0-9_-]+\?replicaSet=rs0&directConnection=true$/.test(config.mongodbUri)) throw new Error('MONGO_LOCAL_REPLICA_REQUIRED');
-  return {...config, endpoint:storage.origin, bucket:env.R2_BUCKET, accessKeyId:env.R2_ACCESS_KEY_ID, secretAccessKey:env.R2_SECRET_ACCESS_KEY};
+  if(env.NEW_MOVIES_PAUSED!==undefined&&!['true','false'].includes(env.NEW_MOVIES_PAUSED))throw new Error('NEW_MOVIES_PAUSED_INVALID');
+  return {...config, newMoviesPaused:env.NEW_MOVIES_PAUSED==='true',endpoint:storage.origin, bucket:env.R2_BUCKET, accessKeyId:env.R2_ACCESS_KEY_ID, secretAccessKey:env.R2_SECRET_ACCESS_KEY};
 }
