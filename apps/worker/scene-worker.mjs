@@ -106,7 +106,7 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
         try{
           const current=await movies.findOne({_id:m._id});
           for(const key of [normalizedKey,lastFrameKey]){
-            if(current?.slots[n-1].normalizedKey===key||current?.slots[n-1].lastFrameKey===key)continue;
+            if(current?.slots?.[n-1].normalizedKey===key||current?.slots?.[n-1].lastFrameKey===key)continue;
             try{await storage.remove(key);}catch{if(current)await movies.updateOne({_id:m._id},{$addToSet:{cleanupPending:key}});}
           }
         }catch{console.warn('SCENE_OUTPUT_RECONCILIATION_REQUIRED');}
