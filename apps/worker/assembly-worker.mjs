@@ -18,11 +18,13 @@ export function createAssemblyWorker({collections:{movies},storage,media=createM
     if(!m)return false;
     const key='movies/'+m.publicId+'/final/'+m.work.jobId+'/'+m.work.leaseId+'.mp4';
     let dir,published=false,lost=false,heartbeatBusy=false,attemptedPut=false;
+    const controller=new AbortController(),processor=media.withSignal?.(controller.signal)||media;
+    const loseLease=()=>{lost=true;controller.abort();};
     const heartbeat=setInterval(async()=>{
       if(heartbeatBusy||lost)return;
       heartbeatBusy=true;
-      try{const at=now(),r=await movies.updateOne(scope(m,at),{$set:{'work.leaseUntil':new Date(at.getTime()+LEASE_MS)}});if(r.matchedCount!==1)lost=true;}
-      catch{lost=true;}finally{heartbeatBusy=false;}
+      try{const at=now(),r=await movies.updateOne(scope(m,at),{$set:{'work.leaseUntil':new Date(at.getTime()+LEASE_MS)}});if(r.matchedCount!==1)loseLease();}
+      catch{loseLease();}finally{heartbeatBusy=false;}
     },20000);heartbeat.unref();
     try{
       if(m.slots.length!==R.sceneCount||m.slots.some((s,i)=>s.number!==i+1||s.status!=='accepted'||!s.normalizedKey))throw new Error('ASSEMBLY_SOURCE_INVALID');
@@ -32,7 +34,7 @@ export function createAssemblyWorker({collections:{movies},storage,media=createM
         const path=join(dir,'scene-'+s.number+'.mp4');await storage.get(s.normalizedKey,path);inputs.push(path);
         if(lost)throw new Error('LEASE_LOST');
       }
-      const out=await media.assembleMovie(inputs,dir);
+      const out=await processor.assembleMovie(inputs,dir);
       if(lost)throw new Error('LEASE_LOST');
       attemptedPut=true;await storage.put(key,out.final,'video/mp4');
       if(lost)throw new Error('LEASE_LOST');
