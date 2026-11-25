@@ -1,0 +1,13 @@
+{
+  "name": "@ptm/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --env-file-if-exists=../../.env check.mjs",
+    "dev": "node --env-file-if-exists=../../.env run.mjs"
+  },
+  "dependencies": {
+    "mongoose": "^9.0.0"
+  }
+}
