@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import CameraCapture from './camera';
 import FinalReveal from './final-reveal';
+import { browserApiBase as apiBase, betaBrowser, fetchPrivateMedia } from './api';
 
 const initialConsent={adult:false,permissions:false,combineAndDownload:false,externalSharing:false};
 const consentLabels={
@@ -12,13 +13,6 @@ const consentLabels={
   externalSharing:'I understand other contributors can share the finished movie outside this app.'
 };
 const scoped=(path,slot)=>path+'?slot='+slot;
-function apiBase(){
-  const host=window.location.hostname;
-  if(!['localhost','127.0.0.1'].includes(host))throw new Error('This flow is local-development only.');
-  const origin=new URL(process.env.NEXT_PUBLIC_API_ORIGIN||('http://'+host+':4000'));
-  if(origin.hostname!==host||!['http:','https:'].includes(origin.protocol)||origin.pathname!=='/'||origin.search||origin.hash||origin.username||origin.password)throw new Error('Invalid local API origin.');
-  return origin.origin+'/v1';
-}
 async function request(path,options={}){
   const res=await fetch(apiBase()+path,{credentials:'include',cache:'no-store',...options});
   const data=await res.json().catch(()=>({}));
@@ -54,7 +48,7 @@ function linkFor(movie,kind,token){
   u.hash=token;return u.href;
 }
 export default function ScenePage(){
-  const [movie,setMovie]=useState(null),[personal,setPersonal]=useState(''),[invite,setInvite]=useState(null),[join,setJoin]=useState(null),[consent,setConsent]=useState(initialConsent),[blob,setBlob]=useState(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[progress,setProgress]=useState(null),[local,setLocal]=useState(false),[reference,setReference]=useState(null),[invalid,setInvalid]=useState(false),[removalRequested,setRemovalRequested]=useState(false);
+  const [movie,setMovie]=useState(null),[personal,setPersonal]=useState(''),[invite,setInvite]=useState(null),[join,setJoin]=useState(null),[consent,setConsent]=useState(initialConsent),[blob,setBlob]=useState(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[progress,setProgress]=useState(null),[local,setLocal]=useState(false),[reference,setReference]=useState(null),[invalid,setInvalid]=useState(false),[removalRequested,setRemovalRequested]=useState(false),[beta,setBeta]=useState(false),[startKey,setStartKey]=useState('');
   const attempt=useRef(null),active=useRef(true);
   const path=movie?'/movies/'+encodeURIComponent(movie.publicId):null;
   const slot=movie?.mySlot,status=movie?.myScene.status;
@@ -66,7 +60,7 @@ export default function ScenePage(){
     active.current=true;let cancelled=false;
     async function restore(){
       try{
-        apiBase();setLocal(true);
+        apiBase();setLocal(true);setBeta(betaBrowser());
         const loc=new URL(window.location.href),parts=loc.pathname.split('/').filter(Boolean),token=loc.hash.slice(1);
         const id=parts.length===2&&['join','access'].includes(parts[0])?parts[1]:loc.searchParams.get('movie');
         if(!id)return;
@@ -109,7 +103,7 @@ export default function ScenePage(){
     setReference(null);
     (async()=>{
       try{
-        const res=await fetch(apiBase()+scoped(path+'/reference',slot),{credentials:'include',cache:'no-store',signal:controller.signal});
+        const res=await fetchPrivateMedia(apiBase()+scoped(path+'/reference',slot),{signal:controller.signal});
         if(!res.ok||!res.headers.get('content-type')?.includes('image/jpeg'))throw new Error('REFERENCE_UNAVAILABLE');
         const image=await res.blob();if(controller.signal.aborted)return;
         url=URL.createObjectURL(image);setReference(url);
@@ -122,7 +116,7 @@ export default function ScenePage(){
     try{await fn();}catch(e){if(active.current)setError(e.message);}
     finally{if(active.current)setBusy(false);}
   }
-  function start(){if(consent.adult)action(async()=>{const data=await post('/movies',{adult:true});if(active.current)adopt(data);});}
+  function start(){if(consent.adult)action(async()=>{const data=await post('/movies',{adult:true,...(beta?{betaStartKey:startKey}:{})});if(active.current){setStartKey('');adopt(data);}});}
   function accept(){if(join&&consent.adult)action(async()=>{
     const data=await post('/movies/'+encodeURIComponent(join.id)+'/claim',{adult:true,inviteToken:join.token});if(active.current)adopt(data);
   });}
@@ -162,15 +156,16 @@ export default function ScenePage(){
   const allConsent=Object.values(consent).every(Boolean);
   const title=removalRequested?'Movie removal requested':join?'Continue the movie':movie?.canViewFinal?'Your movie is ready!':accepted?'Scene saved!':movie?'Scene '+slot+' of 5':'Start a movie';
   return <main className="mx-auto flex min-h-dvh max-w-[440px] flex-col gap-5 px-5 py-8">
-    <header className="flex items-center justify-between"><a href="/" className="font-black">PASS THE MOVIE.</a><span className="text-xs font-bold">LOCAL DEV</span></header>
+    <header className="flex items-center justify-between"><a href="/" className="font-black">PASS THE MOVIE.</a><span className="text-xs font-bold">{beta?'PRIVATE STAGING':'LOCAL DEV'}</span></header>
     <h1 className="text-3xl font-black">{title}</h1>
     <ol aria-label="Movie progress" className="grid grid-cols-5 gap-2">{Array.from({length:5},(_,i)=><li key={i} className="rounded-lg border border-[#24211e] px-1 py-3 text-center text-xs font-bold">{movie?.slots[i].status==='accepted'?'Saved':movie?.activeSlot===i+1?(i+1)+' · 3s':i+1}</li>)}</ol>
     {notice&&<p role="status" className="text-sm">{notice}</p>}
     {error&&<p role="alert" className="rounded-xl border border-[#b63222] p-3 text-sm">Unable to continue: {error}</p>}
-    {loading?<p>Checking your session…</p>:!local?<p>This screen is only enabled for local development.</p>:invalid?<p>{removalRequested?'No participant can access this movie through the app. Previously downloaded copies cannot be recalled.':'This turn is unavailable. The movie may have expired or been deleted, or your turn may have been replaced.'}</p>:!movie?<>
+    {loading?<p>Checking your session…</p>:!local?<p>This screen is not enabled on this host.</p>:invalid?<p>{removalRequested?'No participant can access this movie through the app. Previously downloaded copies cannot be recalled.':'This turn is unavailable. The movie may have expired or been deleted, or your turn may have been replaced.'}</p>:!movie?<>
       <p>{join?'Accept this turn to see the last frame of the previous scene.':'Five friends. Three seconds each.'} The completed movie will be downloadable by its contributors and may be shared externally.</p>
       <label className="flex items-center gap-2"><input type="checkbox" checked={consent.adult} onChange={e=>setConsent({...consent,adult:e.target.checked})}/> I am 18 or older.</label>
-      <button className="ptm-primary" disabled={!consent.adult||busy} onClick={join?accept:start}>{join?'Accept turn':'Start a movie'}</button>
+      {beta&&!join&&<label className="flex flex-col gap-2 text-sm">Private beta start key<input type="password" autoComplete="off" value={startKey} onChange={e=>setStartKey(e.target.value)} maxLength={43} className="rounded-lg border p-3"/></label>}
+      <button className="ptm-primary" disabled={!consent.adult||busy||(beta&&!join&&startKey.length!==43)} onClick={join?accept:start}>{join?'Accept turn':'Start a movie'}</button>
     </>:<>
       <p className="text-sm">Movie expires {new Date(movie.expiresAt).toLocaleString()}.{movie.turnExpiresAt&&!waiting?' Record before '+new Date(movie.turnExpiresAt).toLocaleTimeString()+'.':''}</p>
       <details className="rounded-xl border p-3 text-sm"><summary className="font-bold">Save my private access link</summary>
@@ -192,13 +187,13 @@ export default function ScenePage(){
         {status==='retryable'&&<p role="alert">Scene rejected: {movie.myScene.errorCode}. Please retake.</p>}
         <p className="text-sm">Your clip is uploaded only when you submit. Accepted clips are immutable.</p>
         <div className="flex flex-col gap-2">{Object.entries(consentLabels).map(([key,label])=><label key={key} className="flex items-start gap-2 text-sm"><input className="mt-1" type="checkbox" checked={consent[key]} disabled={busy} onChange={e=>{if(!e.target.checked)onTake(null);setConsent({...consent,[key]:e.target.checked});}}/>{label}</label>)}</div>
-        {allConsent&&(slot===1||reference)?<CameraCapture onTake={onTake} disabled={busy}/>:<p className="text-sm">Confirm the recording rules and wait for the reference before opening your camera.</p>}
-        <button className="ptm-primary" disabled={busy||!allConsent||!blob||(slot>1&&!reference)} onClick={submit}>Use this scene</button>
+        {beta?<p role="status" className="rounded-xl border p-3 text-sm">Cloud recording is disabled until the hosting and media security checks pass.</p>:allConsent&&(slot===1||reference)?<CameraCapture onTake={onTake} disabled={busy}/>:<p className="text-sm">Confirm the recording rules and wait for the reference before opening your camera.</p>}
+        <button className="ptm-primary" disabled={beta||busy||!allConsent||!blob||(slot>1&&!reference)} onClick={submit}>Use this scene</button>
         {progress!==null&&<div role="status">Uploading… {progress}%<progress className="w-full" max="100" value={progress}/></div>}
       </>}
       {movie.canDelete&&<button className="ptm-secondary border-[#b63222] text-[#b63222]" disabled={busy} onClick={deleteMovie}>Delete entire movie</button>}
       {movie.canAbandon&&movie.role!=='creator'&&<button className="ptm-secondary" disabled={busy} onClick={abandon}>Abandon unfinished turn</button>}
-      <p className="text-xs">Synthetic local test only. No public sharing or automatic social posting.</p>
+      <p className="text-xs">{beta?'Private staging only. Recording disabled.':'Synthetic local test only.'} No public sharing or automatic social posting.</p>
     </>}
     <footer className="flex flex-wrap gap-4 text-xs"><a href="/privacy" className="underline">Privacy and recording rules</a><a href={movie?'/report?movie='+encodeURIComponent(movie.publicId):'/report'} className="underline">Report a concern</a></footer>
   </main>;
