@@ -1,4 +1,5 @@
 import { S3Client, HeadBucketCommand, HeadObjectCommand, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { Transform } from 'node:stream';
@@ -33,6 +34,20 @@ export function createStorage(config) {
       const limiter=new Transform({transform(chunk,_enc,cb){bytes+=chunk.length;cb(bytes>size?new Error('STORAGE_SIZE_MISMATCH'):null,chunk);}});
       await pipeline(object.Body,limiter,createWriteStream(path,{flags:'wx',mode:0o600}),{signal:AbortSignal.timeout(20000)});
       if(bytes!==size)throw new Error('STORAGE_SIZE_MISMATCH');
+    },
+    async signRead(key,{movieId,expiresAt,download=false,now=new Date()}){
+      keyCheck(key);
+      if(config.mode!=='beta'||typeof movieId!=='string'||!(/^[a-f0-9-]{36}$/.test(movieId)))throw new Error('SIGNED_READ_INVALID');
+      const prefix='movies/'+movieId+'/';
+      const relative=key.slice(prefix.length);
+      if(!key.startsWith(prefix)||!(/^(?:frames\/[1-5]\/[a-f0-9-]+\/[a-f0-9-]+\.jpg|final\/[a-f0-9-]+\/[a-f0-9-]+\.mp4)$/.test(relative)))throw new Error('SIGNED_READ_INVALID');
+      if(download&&!relative.startsWith('final/'))throw new Error('SIGNED_READ_INVALID');
+      const lifetime=Math.min(60,Math.floor((new Date(expiresAt).getTime()-now.getTime())/1000));
+      if(!Number.isInteger(lifetime)||lifetime<1)throw new Error('SIGNED_READ_EXPIRED');
+      const command=new GetObjectCommand({Bucket:bucket,Key:key,
+        ...(download?{ResponseContentDisposition:'attachment; filename="pass-the-movie-'+movieId+'.mp4"'}:{})});
+      const url=await getSignedUrl(client,command,{expiresIn:lifetime,signingDate:now});
+      return {url,expiresAt:new Date(now.getTime()+lifetime*1000).toISOString()};
     },
     async remove(key){keyCheck(key);await send(new DeleteObjectCommand({Bucket:bucket,Key:key}));},
     async listPage({prefix='movies/',cursor}={}){
