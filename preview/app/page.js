@@ -20,7 +20,7 @@ export default function Preview(){
     setScenes(sampleOnly?samples():[]);setStage(sampleOnly?'assemble':'record');
   }
   async function useScene(kind){
-    if(busy||scenes.length>=5||(kind==='clip'&&(!take||!permission)))return;
+    if(job.current||busy||scenes.length>=5||(kind==='clip'&&(!take||!permission)))return;
     const controller=new AbortController();job.current=controller;setBusy(true);setError('');
     const next={number:slot,kind,...(kind==='clip'?{blob:take}:{})};
     try{
@@ -32,20 +32,29 @@ export default function Preview(){
     finally{if(job.current===controller){setBusy(false);job.current=null;}}
   }
   async function assemble(){
-    if(busy||scenes.length!==5)return;
+    if(job.current||busy||scenes.length!==5)return;
     const controller=new AbortController();job.current=controller;setBusy(true);setError('');setNotice('');setProgress(0);setStage('rendering');
     try{
-      const blob=await renderMovie(scenes,{sound,signal:controller.signal,onProgress:setProgress});
-      if(controller.signal.aborted)return;
+      const blob=await renderMovie(scenes,{sound,signal:controller.signal,onProgress:value=>{if(job.current===controller&&!controller.signal.aborted)setProgress(value);}});
+      if(controller.signal.aborted)throw new Error('Export cancelled.');
       const ext=blob.type.includes('mp4')?'mp4':'webm',filename='pass-the-movie-'+new Date().toISOString().replace(/[:.]/g,'-')+'.'+ext;
       const file=new File([blob],filename,{type:ext==='mp4'?'video/mp4':'video/webm'}),url=URL.createObjectURL(file);
       if(fileUrl.current)URL.revokeObjectURL(fileUrl.current);fileUrl.current=url;
       let shareable=false;try{shareable=!!navigator.share&&!!navigator.canShare?.({files:[file]});}catch{}
       setMovie({file,url,ext,filename,shareable});setScenes([]);setRef('');setStage('reveal');
-    }catch(e){if(!controller.signal.aborted){setError(e.message||'Movie export failed.');setStage('assemble');}}
+    }catch(e){
+      if(job.current===controller){
+        setError(controller.signal.aborted?'Export cancelled. Your five scenes are still available in this tab.':e.message||'Movie export failed.');
+        setNotice('');setStage('assemble');
+      }
+    }
     finally{if(job.current===controller){setBusy(false);job.current=null;}}
   }
-  function cancelRender(){job.current?.abort();job.current=null;setBusy(false);setStage('assemble');setError('Export cancelled. Your five scenes are still available in this tab.');}
+  function cancelRender(){
+    if(!job.current||job.current.signal.aborted)return;
+    job.current.abort();
+    setNotice('Cleaning up the cancelled export…');
+  }
   function share(){
     if(!movie?.shareable)return;
     try{navigator.share({files:[movie.file],title:'Pass the Movie'}).catch(e=>{if(e.name!=='AbortError')setError('Sharing unavailable. Download the video instead.');});}catch{setError('Sharing unavailable. Download the video instead.');}
@@ -84,7 +93,7 @@ export default function Preview(){
         <section className="rounded-xl border border-ptm-line p-4 ptm-detail"><p>This test exports the movie using your browser, not our production FFmpeg worker. Target: 15 seconds, vertical 9:16 video. Keep the screen on.</p>
           {scenes.some(s=>s.kind==='clip')&&<label className="mt-3 flex items-center gap-2"><input type="checkbox" checked={sound} onChange={e=>setSound(e.target.checked)}/> Include recorded sound if supported</label>}
         </section>
-        <button className="ptm-primary" onClick={assemble}>Reveal the movie</button>
+        <button className="ptm-primary" disabled={busy} onClick={assemble}>Reveal the movie</button>
       </>}
       {stage==='rendering'&&<>
         <h1 className="ptm-heading">Making your movie…</h1>
