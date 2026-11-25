@@ -24,15 +24,41 @@ function sample(ctx,n,t){
   ctx.fillStyle='#fff9f0';ctx.font='bold 30px system-ui';ctx.fillText('SAMPLE ANIMATION',360,1130);
 }
 function label(ctx){ctx.fillStyle='rgba(20,20,20,.62)';ctx.fillRect(222,84,276,48);ctx.font='bold 24px system-ui';ctx.textAlign='center';ctx.fillStyle='white';ctx.fillText('PASS THE MOVIE',360,116);}
-function eventWait(target,type,signal,ms=7000){
+// Frame and playback waits must terminate even when animation frames are
+// suspended by a hidden tab, or a browser media promise never settles.
+function foregroundWait(signal,ms,register,message='Video preparation timed out.'){
   return new Promise((resolve,reject)=>{
-    let timer;
-    const clean=()=>{clearTimeout(timer);target.removeEventListener(type,ok);target.removeEventListener('error',bad);signal?.removeEventListener('abort',abort);};
-    const ok=()=>{clean();resolve();},bad=()=>{clean();reject(new Error('Could not read the recorded video. Try a new take.'));},abort=()=>{clean();reject(new Error('Preview cancelled.'));};
-    target.addEventListener(type,ok,{once:true});target.addEventListener('error',bad,{once:true});signal?.addEventListener('abort',abort,{once:true});
-    timer=setTimeout(()=>{clean();reject(new Error('Video preparation timed out.'));},ms);
-    if(signal?.aborted)abort();
+    let timer,dispose,settled=false;
+    const finish=(error,value)=>{
+      if(settled)return;settled=true;clearTimeout(timer);
+      signal?.removeEventListener('abort',abort);
+      document.removeEventListener('visibilitychange',visibility);
+      dispose?.();
+      error?reject(error):resolve(value);
+    };
+    const abort=()=>finish(new Error('Preview cancelled.'));
+    const visibility=()=>{if(document.hidden)finish(new Error('Keep the app open while preparing the video. Please retry.'));};
+    signal?.addEventListener('abort',abort,{once:true});document.addEventListener('visibilitychange',visibility);
+    timer=setTimeout(()=>finish(new Error(message)),ms);
+    if(signal?.aborted){abort();return;}
+    if(document.hidden){visibility();return;}
+    try{
+      dispose=register(finish);
+      if(settled)dispose?.();
+    }catch(e){finish(e);}
   });
+}
+function eventWait(target,type,signal,ms=7000){
+  return foregroundWait(signal,ms,finish=>{
+    const ok=()=>finish(),bad=()=>finish(new Error('Could not read the recorded video. Try a new take.'));
+    target.addEventListener(type,ok,{once:true});target.addEventListener('error',bad,{once:true});
+    return ()=>{target.removeEventListener(type,ok);target.removeEventListener('error',bad);};
+  });
+}
+function playVideo(video,signal){
+  return foregroundWait(signal,5000,finish=>{
+    Promise.resolve(video.play()).then(()=>finish(),()=>finish(new Error('Browser blocked video playback. Try without sound or use Chrome.')));
+  },'Video playback did not start. Please retry.');
 }
 async function loadVideo(blob,signal){
   check(signal);const v=document.createElement('video'),url=URL.createObjectURL(blob);
@@ -57,15 +83,23 @@ export async function lastFrame(scene,signal){
     }else{
       // Some MediaRecorder WebM files have no duration metadata. Play them
       // through and keep the last decoded image, bounded by a short timeout.
-      await v.play();
-      await new Promise((resolve,reject)=>{
-        const begin=performance.now();let frame;
-        const finish=(error)=>{cancelAnimationFrame(frame);v.pause();error?reject(error):resolve();};
-        const tick=()=>{if(signal?.aborted||document.hidden){finish(new Error('Keep the preview open while preparing the frame.'));return;}
+      await playVideo(v,signal);
+      await foregroundWait(signal,5500,finish=>{
+        let frame;
+        const ended=()=>{
+          try{if(v.readyState>=2)fit(ctx,v);finish();}catch(e){finish(e);}
+        };
+        const failed=()=>finish(new Error('Could not finish reading this clip. Please retake.'));
+        const tick=()=>{
           try{if(v.readyState>=2)fit(ctx,v);}catch(e){finish(e);return;}
-          if(v.ended||performance.now()-begin>3500){finish();return;}frame=requestAnimationFrame(tick);
-        };tick();
-      });
+          if(v.ended){ended();return;}
+          frame=requestAnimationFrame(tick);
+        };
+        v.addEventListener('ended',ended,{once:true});v.addEventListener('error',failed,{once:true});
+        frame=requestAnimationFrame(tick);
+        if(v.ended)ended();
+        return ()=>{cancelAnimationFrame(frame);v.pause();v.removeEventListener('ended',ended);v.removeEventListener('error',failed);};
+      },'Could not reach the last frame. Retake the scene or try another browser.');
     }
     return c.toDataURL('image/jpeg',.86);
   }finally{cleanup();}
@@ -91,7 +125,9 @@ export async function renderMovie(scenes,{sound=false,signal,onProgress=()=>{}}=
       const Audio=window.AudioContext||window.webkitAudioContext;
       if(!Audio)throw new Error('Sound export is unavailable. Turn off export sound and retry.');
       audio=new Audio();
-      await audio.resume();
+      await foregroundWait(signal,5000,finish=>{
+        audio.resume().then(()=>finish(),()=>finish(new Error('Sound export is unavailable. Turn off export sound and retry.')));
+      },'Sound export did not start. Turn off export sound and retry.');
       if(audio.state!=='running')throw new Error('Sound export is unavailable. Turn off export sound and retry.');
     }
     const dest=audio?.createMediaStreamDestination();
@@ -103,6 +139,7 @@ export async function renderMovie(scenes,{sound=false,signal,onProgress=()=>{}}=
       }else loaded.push(null);
     }
     check(signal);
+    if(document.hidden)throw new Error('Keep this tab visible during export.');
     const paint=(n,t)=>{const entry=loaded[n];if(entry)fit(ctx,entry.v);else sample(ctx,scenes[n].number,t);label(ctx);};
     paint(0,0);stream=c.captureStream(30);
     if(dest)for(const track of dest.stream.getAudioTracks())stream.addTrack(track);
@@ -120,7 +157,9 @@ export async function renderMovie(scenes,{sound=false,signal,onProgress=()=>{}}=
       recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
       recorder.onerror=()=>fail('Browser video export failed. Try again or turn off export sound.');
       recorder.onstop=()=>{
-        if(settled)return;settled=true;clearTimeout(timeout);
+        if(settled)return;settled=true;clearTimeout(timeout);cancelAnimationFrame(frame);
+        if(signal?.aborted){reject(new Error('Preview cancelled.'));return;}
+        if(!started||performance.now()-started<COUNT*SECONDS*1000-250){reject(new Error('Browser stopped exporting too early. Please retry.'));return;}
         const type=recorder.mimeType||chunks[0]?.type||'',result=new Blob(chunks,{type});
         if(!/^video\/(mp4|webm)(;|$)/i.test(type)||!result.size||result.size>24*1024*1024){reject(new Error('The browser did not produce a supported movie file.'));return;}
         resolve(result);
@@ -139,7 +178,7 @@ export async function renderMovie(scenes,{sound=false,signal,onProgress=()=>{}}=
         onProgress(Math.min(99,Math.floor(elapsed/(COUNT*SECONDS)*100)));
         frame=requestAnimationFrame(tick);
       };
-      try{recorder.start();started=performance.now();timeout=setTimeout(()=>fail('Export timed out. Please retry.'),24000);tick();}
+      try{if(signal?.aborted||document.hidden){fail('Export interrupted. Please retry.');return;}recorder.start();started=performance.now();timeout=setTimeout(()=>fail('Export timed out. Please retry.'),24000);tick();}
       catch{fail('The browser could not start video export.');}
     });
     return blob;
