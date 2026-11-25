@@ -101,11 +101,11 @@ export default function CameraCapture({onTake,disabled=false}) {
     }catch{interrupt('Recording format unavailable. Try another browser.');}
   }
   return <section className="flex flex-col gap-3">
-    <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-2xl bg-[#24211e]">
+    <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-2xl bg-ptm-player">
       <video ref={video} autoPlay muted playsInline className="h-full w-full" style={{objectFit:fit,display:review?'none':'block'}} />
       {review&&<video src={review} controls playsInline className="absolute inset-0 h-full w-full object-contain" />}
       {count>0&&<span className="absolute inset-0 grid place-items-center text-6xl font-black text-white">{count}</span>}
-      {mode==='recording'&&<span className="absolute left-3 top-3 rounded-full bg-[#b63222] px-3 py-1 text-sm font-bold text-white">REC · 3s</span>}
+      {mode==='recording'&&<span className="absolute left-3 top-3 rounded-full bg-ptm-record px-3 py-1 ptm-detail font-bold text-white">REC · 3s</span>}
     </div>
     <div className="flex flex-wrap items-center gap-2">
       <button className="ptm-secondary" disabled={disabled||busy||mode==='review'} onClick={()=>openCamera()}>{mode==='preview'?'Restart camera':'Open camera'}</button>
@@ -113,6 +113,6 @@ export default function CameraCapture({onTake,disabled=false}) {
       <label className="flex min-h-11 items-center gap-2"><input type="checkbox" checked={mic} disabled={disabled||busy||mode==='review'} onChange={e=>{const value=e.target.checked;setMic(value);if(mode==='preview')openCamera(facing,value);}}/> Mic</label>
     </div>
     {mode==='review'?<button className="ptm-secondary" disabled={disabled} onClick={()=>openCamera()}>Retake</button>:<button className="ptm-primary" disabled={disabled||mode!=='preview'} onClick={start}>Record 3 seconds</button>}
-    <p role="status" className="text-sm">{message}</p>
+    <p role="status" className="ptm-detail">{message}</p>
   </section>;
 }
