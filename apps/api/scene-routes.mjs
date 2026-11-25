@@ -9,7 +9,7 @@ import { BudgetError } from '../../packages/server/budget.mjs';
 import { createReporter } from './reports.mjs';
 
 export function createSceneRouter({config,collections,client,storage,now}) {
-  const router=express.Router(),access=createSceneAccess({collections,client,now});
+  const router=express.Router(),access=createSceneAccess({collections,client,config,now});
   const limiter=createRateLimiter({now});
   const source=req=>req.socket.remoteAddress||'unknown';
   const uploader=createSceneUploader({collections,client,storage,now,onReserve(req,grant){
@@ -49,6 +49,7 @@ export function createSceneRouter({config,collections,client,storage,now}) {
   router.post('/movies/:id/scenes/:slot/upload',async(req,res)=>{
     if(!/^[1-5]$/.test(req.params.slot))return res.status(404).json({code:'NOT_FOUND'});
     const context=await access.authorize(req,{mutation:true,slotNumber:Number(req.params.slot)});
+    if(config.mode==='beta'&&!config.mediaEnabled)throw new SceneError('BETA_MEDIA_DISABLED',503);
     res.status(202).json(await uploader.upload(req,context));
   });
   router.post('/movies/:id/invite',json,async(req,res)=>res.status(201).json(await access.issueInvite(await access.authorize(req,{mutation:true}))));
@@ -63,6 +64,16 @@ export function createSceneRouter({config,collections,client,storage,now}) {
       return previous.lastFrameKey;
     }
     const context=await access.authorize(req),key=keyFor(context);
+    if(config.mode==='beta'){
+      const at=now?now():new Date(),slot=context.movie.slots[context.grant.slotNumber-1];
+      // For an idle claimed turn do not outlive its reservation. Queued work
+      // has its own lease; all links remain bounded by the movie expiry.
+      const deadline=['claimed','retryable'].includes(slot.status)?new Date(Math.min(context.movie.expiresAt.getTime(),slot.reservationUntil.getTime())):context.movie.expiresAt;
+      const signed=await storage.signRead(key,{movieId:context.movie.publicId,expiresAt:deadline,now:at});
+      const latest=await access.authorize(req);
+      if(latest.grant.grantId!==context.grant.grantId||latest.grant.generation!==context.grant.generation||keyFor(latest)!==key)throw new SceneError('NOT_FOUND',404);
+      return res.json(signed);
+    }
     const dir=await mkdtemp(join(tmpdir(),'ptm-reference-'));
     try{
       const path=join(dir,'reference.jpg');await storage.get(key,path);
@@ -79,6 +90,12 @@ export function createSceneRouter({config,collections,client,storage,now}) {
       return movie.final;
     }
     const context=await access.authorize(req),final=finalFor(context);
+    if(config.mode==='beta'){
+      const signed=await storage.signRead(final.key,{movieId:context.movie.publicId,expiresAt:context.movie.expiresAt,download:req.query.download==='1',now:now?now():new Date()});
+      const latest=await access.authorize(req);
+      if(latest.grant.grantId!==context.grant.grantId||latest.grant.generation!==context.grant.generation||finalFor(latest).key!==final.key)throw new SceneError('NOT_FOUND',404);
+      return res.json(signed);
+    }
     const dir=await mkdtemp(join(tmpdir(),'ptm-final-'));
     try{
       const path=join(dir,'final.mp4');await storage.get(final.key,path);
