@@ -49,10 +49,45 @@ try{
     if(n>1)await page.getByRole('img',{name:'Last frame of the previous scene'}).waitFor();
     await page.getByRole('checkbox').check();
     await button('Continue to camera').click();
-    if(n===1)await page.getByRole('checkbox',{name:'Mic'}).check();
+    if(n===1){
+      const rotateMessage='Please rotate your phone to portrait mode.';
+      const landscape=()=>page.setViewportSize({width:844,height:390});
+      const portrait=()=>page.setViewportSize({width:390,height:844});
+      async function assertBlocked(){
+        await wait(rotateMessage);
+        assert.equal(await button('Open camera').isDisabled(),true);
+        assert.equal(await button('Record 3 seconds').isDisabled(),true);
+        assert.equal(await button('Use this scene').isDisabled(),true);
+        assert.equal(await page.locator('video[controls]').count(),0);
+      }
+      await landscape();await assertBlocked();
+      await portrait();await button('Open camera').click();
+      await wait('Ready to record.');
+      await landscape();await assertBlocked();
+      await portrait();await button('Open camera').click();
+      await button('Record 3 seconds').click();
+      await landscape();await assertBlocked();
+      await portrait();await button('Open camera').click();
+      await button('Record 3 seconds').click();
+      await wait('Recording three seconds…');
+      await landscape();await assertBlocked();
+      // Returning to portrait must not auto-resume a cancelled recording.
+      await portrait();await wait('Open your camera when ready.');
+      assert.equal(await button('Record 3 seconds').isDisabled(),true);
+      await page.getByRole('checkbox',{name:'Mic'}).check();
+      console.log('PASS landscape blocks camera; rotation cancels preview, countdown and active capture');
+    }
     await button('Open camera').click();
     await record();
     if(n===1){
+      // A finished portrait clip remains available after rotation, but no
+      // retake can begin until portrait orientation is restored.
+      await page.setViewportSize({width:844,height:390});
+      await wait('Please rotate your phone to portrait mode.');
+      assert.equal(await button('Retake').isDisabled(),true);
+      assert.equal(await button('Use this scene').isEnabled(),true);
+      assert.equal(await page.locator('video[controls]').count(),1);
+      await page.setViewportSize({width:390,height:844});
       await button('Retake').click();
       await record();
       console.log('PASS retake');
