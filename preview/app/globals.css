@@ -1,11 +1,55 @@
 @import "tailwindcss";
 
+@theme {
+  --color-ptm-ink: #18213C;
+  --color-ptm-accent: #4125B8;
+  --color-ptm-tile: #E2E3F6;
+  --color-ptm-signal: #D8F478;
+  --color-ptm-line: #BEC4DD;
+  --color-ptm-muted: #545B74;
+  --color-ptm-player: #12172B;
+  --color-ptm-alert: #A01A46;
+  --color-ptm-record: #AD1749;
+}
+
 :root { color-scheme: light; }
 * { box-sizing: border-box; }
-body { margin: 0; background: #fff9f0; color: #24211e; font-family: system-ui, sans-serif; }
-:focus-visible { outline: 3px solid #24211e; outline-offset: 3px; }
+body {
+  margin: 0;
+  background: #F0EFF8;
+  color: var(--color-ptm-ink);
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+:focus-visible { outline: 3px solid var(--color-ptm-accent); outline-offset: 3px; }
+input[type="checkbox"], progress { accent-color: var(--color-ptm-accent); }
 
-.ptm-primary, .ptm-secondary { min-height: 44px; border-radius: 12px; padding: 10px 16px; font-weight: 700; text-align: center; }
-.ptm-primary { background: #b63222; color: white; border: 1px solid #b63222; }
-.ptm-secondary { background: white; color: #24211e; border: 1px solid #24211e; }
-button:disabled { opacity: .5; cursor: not-allowed; }
+.ptm-brand { font-size: 15px; font-weight: 800; letter-spacing: .045em; }
+.ptm-hero {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.8rem, 7.8vw, 2.5rem);
+  line-height: 1.1;
+  letter-spacing: -.035em;
+  font-weight: 700;
+}
+.ptm-heading {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.55rem, 6.8vw, 1.9rem);
+  line-height: 1.17;
+  letter-spacing: -.025em;
+  font-weight: 700;
+}
+.ptm-lead { font-size: 16px; line-height: 1.55; }
+.ptm-detail { font-size: 14px; line-height: 1.5; }
+.ptm-caption { font-size: 13px; line-height: 1.5; }
+.ptm-tile-caption { font-size: 11px; line-height: 1.35; }
+.ptm-eyebrow { font-size: 11px; line-height: 1.4; font-weight: 700; letter-spacing: .14em; }
+.ptm-primary, .ptm-secondary {
+  min-height: 44px; border-radius: 12px; padding: 10px 16px;
+  font-size: 16px; font-weight: 700; line-height: 1.4; text-align: center;
+}
+.ptm-primary { background: var(--color-ptm-accent); color: white; border: 1px solid var(--color-ptm-accent); }
+.ptm-secondary { background: white; color: var(--color-ptm-ink); border: 1px solid #6F7893; }
+button:disabled { opacity: .55; cursor: not-allowed; }
