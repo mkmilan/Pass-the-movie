@@ -7,13 +7,13 @@ function choices(audio){return audio?['video/mp4;codecs=avc1.42E01E,mp4a.40.2','
 function portrait(w,h){return w>0&&h>0&&Math.abs(w/h-W/H)<0.02;}
 function crop(w,h){const r=W/H;return w/h>r?[(w-h*r)/2,0,h*r,h]:[0,(h-w/r)/2,w,w/r];}
 export default function CameraCapture({onTake,disabled=false}) {
-  const video=useRef(null),alive=useRef(true),camera=useRef(null),capture=useRef(null),recorder=useRef(null),timer=useRef(null),raf=useRef(null),epoch=useRef(0),url=useRef(null),cancelled=useRef(false);
+  const video=useRef(null),alive=useRef(true),camera=useRef(null),capture=useRef(null),recorder=useRef(null),timer=useRef(null),raf=useRef(null),epoch=useRef(0),url=useRef(null),cancelled=useRef(false),recordingSize=useRef(null);
   const [mode,setMode]=useState('idle'),[facing,setFacing]=useState('user'),[mic,setMic]=useState(false),[message,setMessage]=useState('Open your camera when ready.'),[review,setReview]=useState(null),[count,setCount]=useState(0),[fit,setFit]=useState('cover');
   const busy=mode==='opening'||mode==='countdown'||mode==='recording';
   function stopTracks(){
     cancelAnimationFrame(raf.current);raf.current=null;
     if(capture.current&&capture.current!==camera.current)capture.current.getVideoTracks().forEach(t=>t.stop());
-    capture.current=null;
+    capture.current=null;recordingSize.current=null;
     camera.current?.getTracks().forEach(t=>t.stop());camera.current=null;
     if(video.current)video.current.srcObject=null;
   }
@@ -29,8 +29,12 @@ export default function CameraCapture({onTake,disabled=false}) {
     alive.current=true;
     const hide=()=>{if(document.hidden&&(camera.current||!url.current))interrupt('Camera paused. Open it again.');};
     const rotate=()=>{if(recorder.current)interrupt('Keep your phone upright and retake.');};
-    document.addEventListener('visibilitychange',hide);window.addEventListener('orientationchange',rotate);
-    return()=>{alive.current=false;interrupt('');if(url.current)URL.revokeObjectURL(url.current);document.removeEventListener('visibilitychange',hide);window.removeEventListener('orientationchange',rotate);};
+    const resize=()=>{const size=recordingSize.current,v=video.current;if(size&&v&&(v.videoWidth!==size[0]||v.videoHeight!==size[1]))interrupt('Camera orientation changed. Retake.');};
+    const pageHide=()=>{if(camera.current||recorder.current)interrupt('Camera paused. Open it again.');};
+    const player=video.current;
+    player?.addEventListener('resize',resize);
+    document.addEventListener('visibilitychange',hide);window.addEventListener('orientationchange',rotate);window.addEventListener('pagehide',pageHide);
+    return()=>{alive.current=false;interrupt('');if(url.current)URL.revokeObjectURL(url.current);player?.removeEventListener('resize',resize);document.removeEventListener('visibilitychange',hide);window.removeEventListener('orientationchange',rotate);window.removeEventListener('pagehide',pageHide);};
   },[]);
   async function openCamera(nextFacing=facing,nextMic=mic){
     if(disabled||busy)return;
@@ -62,6 +66,7 @@ export default function CameraCapture({onTake,disabled=false}) {
     if(!s||!v?.videoWidth||ticket!==epoch.current){interrupt('Camera not ready.');return;}
     setMode('recording');setMessage('Recording three seconds…');
     const w=v.videoWidth,h=v.videoHeight;
+    recordingSize.current=[w,h];
     let stream=s;
     try{
       if(!portrait(w,h)&&typeof HTMLCanvasElement.prototype.captureStream==='function'){
@@ -103,7 +108,7 @@ export default function CameraCapture({onTake,disabled=false}) {
   return <section className="flex flex-col gap-3">
     <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-2xl bg-ptm-player">
       <video ref={video} autoPlay muted playsInline className="h-full w-full" style={{objectFit:fit,display:review?'none':'block'}} />
-      {review&&<video src={review} controls playsInline className="absolute inset-0 h-full w-full object-contain" />}
+      {review&&<video src={review} controls playsInline onError={()=>{if(url.current!==review)return;releaseReview();onTake(null);setMode('idle');setMessage('This recording could not be played. Please retake.');}} className="absolute inset-0 h-full w-full object-contain" />}
       {count>0&&<span className="absolute inset-0 grid place-items-center text-6xl font-black text-white">{count}</span>}
       {mode==='recording'&&<span className="absolute left-3 top-3 rounded-full bg-ptm-record px-3 py-1 ptm-detail font-bold text-white">REC · 3s</span>}
     </div>
