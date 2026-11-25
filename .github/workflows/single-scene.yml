@@ -13,7 +13,7 @@ permissions:
   contents: read
 jobs:
   single-scene:
-    if: github.head_ref == 'feat/single-scene' || github.head_ref == 'feat/movie-chain' || github.head_ref == 'feat/movie-reveal' || github.head_ref == 'feat/hardening'
+    if: github.head_ref == 'feat/single-scene' || github.head_ref == 'feat/movie-chain' || github.head_ref == 'feat/movie-reveal' || github.head_ref == 'feat/hardening' || github.head_ref == 'feat/beta-prep'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
