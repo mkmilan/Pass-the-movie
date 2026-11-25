@@ -38,34 +38,9 @@ export function createStorage(config) {
     },
     async signWrite(key,{movieId,slot,bytes,type,expiresAt,now=new Date()}){
       keyCheck(key);
-      if(!/^[a-f0-9-]{36}$/.test(movieId)||!Number.isInteger(slot)||slot<1||slot>5||
-        !new RegExp('^movies/'+movieId+'/raw/'+slot+'/[a-f0-9-]{36}\\.clipkey,{movieId,expiresAt,download=false,now=new Date()}){
-      keyCheck(key);
-      if(config.mode!=='beta'||typeof movieId!=='string'||!(/^[a-f0-9-]{36}$/.test(movieId)))throw new Error('SIGNED_READ_INVALID');
-      const prefix='movies/'+movieId+'/';
-      const relative=key.slice(prefix.length);
-      if(!key.startsWith(prefix)||!(/^(?:frames\/[1-5]\/[a-f0-9-]+\/[a-f0-9-]+\.jpg|final\/[a-f0-9-]+\/[a-f0-9-]+\.mp4)$/.test(relative)))throw new Error('SIGNED_READ_INVALID');
-      if(download&&!relative.startsWith('final/'))throw new Error('SIGNED_READ_INVALID');
-      const lifetime=Math.min(60,Math.floor((new Date(expiresAt).getTime()-now.getTime())/1000));
-      if(!Number.isInteger(lifetime)||lifetime<1)throw new Error('SIGNED_READ_EXPIRED');
-      const command=new GetObjectCommand({Bucket:bucket,Key:key,
-        ...(download?{ResponseContentDisposition:'attachment; filename="pass-the-movie-'+movieId+'.mp4"'}:{})});
-      const url=await getSignedUrl(client,command,{expiresIn:lifetime,signingDate:now});
-      return {url,expiresAt:new Date(now.getTime()+lifetime*1000).toISOString()};
-    },
-    async remove(key){keyCheck(key);await send(new DeleteObjectCommand({Bucket:bucket,Key:key}));},
-    async listPage({prefix='movies/',cursor}={}){
-      if(prefix!=='movies/'&&!/^movies\/[a-zA-Z0-9-]+\/$/.test(prefix))throw new Error('STORAGE_PREFIX_INVALID');
-      const response=await send(new ListObjectsV2Command({Bucket:bucket,Prefix:prefix,MaxKeys:100,...(cursor?{ContinuationToken:cursor}:{})}));
-      const objects=(response.Contents||[]).map(o=>({key:o.Key,lastModified:o.LastModified}));
-      for(const o of objects){keyCheck(o.key);if(!o.key.startsWith(prefix))throw new Error('STORAGE_PREFIX_MISMATCH');}
-      if(response.IsTruncated&&!response.NextContinuationToken)throw new Error('STORAGE_CURSOR_MISSING');
-      return {objects,cursor:response.IsTruncated?response.NextContinuationToken:null};
-    },
-    close(){client.destroy();}
-  };
-}
-).test(key)||
+      const prefix='movies/'+movieId+'/raw/'+slot+'/';
+      if(typeof movieId!=='string'||!/^[a-f0-9-]{36}$/.test(movieId)||!Number.isInteger(slot)||slot<1||slot>5||
+        !key.startsWith(prefix)||!/^[a-f0-9-]{36}\.clip$/.test(key.slice(prefix.length))||
         !Number.isInteger(bytes)||bytes<12||bytes>R.maxUploadBytes||!['video/mp4','video/webm'].includes(type))throw Error('SIGNED_WRITE_INVALID');
       const lifetime=Math.min(90,Math.floor((new Date(expiresAt).getTime()-now.getTime())/1000));
       if(!Number.isInteger(lifetime)||lifetime<1)throw Error('SIGNED_WRITE_EXPIRED');
@@ -73,7 +48,6 @@ export function createStorage(config) {
       const command=new PutObjectCommand({Bucket:bucket,Key:key,ContentLength:bytes,ContentType:type,IfNoneMatch:'*'});
       const url=await getSignedUrl(client,command,{expiresIn:lifetime,signingDate:now,signableHeaders:new Set(required)});
       const signed=new Set(new URL(url).searchParams.get('X-Amz-SignedHeaders')?.split(';'));
-      // Fail closed if an SDK update drops a required signed header.
       if(!required.every(h=>signed.has(h)))throw Error('SIGNED_WRITE_HEADERS_INVALID');
       return {url,expiresAt:new Date(now.getTime()+lifetime*1000).toISOString(),headers:{'Content-Type':type,'If-None-Match':'*'}};
     },

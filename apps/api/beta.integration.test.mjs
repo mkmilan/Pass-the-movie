@@ -28,6 +28,11 @@ test('beta HTTP flow requires a private key and refuses all uploads',{skip:proce
     const headers={Cookie:cookie.split(';')[0],'X-CSRF-Token':data.csrfToken};
     const blocked=await post('/movies/'+data.publicId+'/scenes/1/upload',{},headers);
     assert.equal(blocked.status,503);assert.equal((await blocked.json()).code,'BETA_MEDIA_DISABLED');
+    for(const phase of ['start','complete']){
+      const result=await post('/movies/'+data.publicId+'/scenes/1/upload/'+phase,{},headers);
+      assert.equal(result.status,503);
+      assert.equal((await result.json()).code,'BETA_MEDIA_DISABLED');
+    }
     const movie=await collections.movies.findOne({publicId:data.publicId});
     assert.equal(movie.slots[0].status,'claimed');assert.equal(movie.work,null);
     assert.equal((await collections.budgets.findOne({_id:'day:'+new Date().toISOString().slice(0,10)})).bytes,0);

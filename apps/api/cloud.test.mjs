@@ -59,3 +59,23 @@ test('offline R2 signer constrains key, operation and lifetime',async()=>{
     await assert.rejects(storage.signRead(final,{movieId:id,expiresAt:now,now}));
   }finally{storage.close();}
 });
+
+test('direct upload signer binds exact key, length, type, conditional PUT and expiry',async()=>{
+  const storage=createStorage(cloudConfig(sample));
+  const movieId='12345678-1234-1234-1234-123456789abc',attempt='87654321-4321-4321-4321-cba987654321',key='movies/'+movieId+'/raw/2/'+attempt+'.clip';
+  const now=new Date('2026-11-25T10:00:00Z'),opts={movieId,slot:2,bytes:123456,type:'video/mp4',now,expiresAt:new Date(now.getTime()+300000)};
+  try{
+    const grant=await storage.signWrite(key,opts),url=new URL(grant.url);
+    assert.equal(url.pathname,'/'+sample.R2_BUCKET+'/'+key);
+    assert.equal(url.searchParams.get('X-Amz-Expires'),'90');
+    assert.ok(url.searchParams.get('X-Amz-Signature'));
+    for(const name of ['content-length','content-type','if-none-match','host'])assert.ok(url.searchParams.get('X-Amz-SignedHeaders').split(';').includes(name),name);
+    assert.deepEqual(grant.headers,{'Content-Type':'video/mp4','If-None-Match':'*'});
+    assert.equal((await storage.signWrite(key,{...opts,expiresAt:new Date(now.getTime()+3000)})).expiresAt,new Date(now.getTime()+3000).toISOString());
+    const different=await storage.signWrite(key,{...opts,bytes:opts.bytes+1});
+    assert.notEqual(new URL(different.url).searchParams.get('X-Amz-Signature'),url.searchParams.get('X-Amz-Signature'));
+    for(const bad of [{slot:1},{bytes:0},{bytes:12582913},{type:'image/jpeg'},{expiresAt:now}])await assert.rejects(storage.signWrite(key,{...opts,...bad}));
+    await assert.rejects(storage.signWrite('movies/'+movieId+'/final/a/b.mp4',opts));
+    await assert.rejects(storage.signWrite(key.replace(attempt+'.clip',attempt+'xclip'),opts));
+  }finally{storage.close();}
+});
