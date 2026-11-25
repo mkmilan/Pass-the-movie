@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { fetchPrivateMedia } from './api';
 
 export default function FinalReveal({movie,apiOrigin}){
   const [file,setFile]=useState(null),[url,setUrl]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(true),[shareable,setShareable]=useState(false),[reload,setReload]=useState(0);
@@ -15,7 +16,7 @@ export default function FinalReveal({movie,apiOrigin}){
     const timer=setTimeout(expire,remaining);
     (async()=>{
       try{
-        const response=await fetch(apiOrigin+'/movies/'+encodeURIComponent(id)+'/final?slot='+slot,{credentials:'include',cache:'no-store',signal:controller.signal});
+        const response=await fetchPrivateMedia(apiOrigin+'/movies/'+encodeURIComponent(id)+'/final?slot='+slot,{signal:controller.signal});
         if(!response.ok||!response.headers.get('content-type')?.includes('video/mp4'))throw new Error('FINAL_UNAVAILABLE');
         const blob=await response.blob();
         if(blob.size<=0||blob.size>12*1024*1024||blob.size!==movie.final.bytes)throw new Error('FINAL_UNAVAILABLE');
