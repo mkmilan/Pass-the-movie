@@ -40,7 +40,7 @@ export async function sendDirectClip(movie,blob,key,consent,onProgress){
   const url=new URL(grant.url);
   const local=!betaBrowser();
   const validOrigin=local?url.origin===(process.env.NEXT_PUBLIC_PTM_LOCAL_STORAGE_ORIGIN||'http://127.0.0.1:9000'):
-    url.protocol==='https:'&&/^[a-f0-9]{32}(?:\\.eu)?\\.r2\\.cloudflarestorage\\.com$/.test(url.hostname)&&!url.port;
+    url.protocol==='https:'&&/^[a-f0-9]{32}(?:\.eu)?\.r2\.cloudflarestorage\.com$/.test(url.hostname)&&!url.port;
   const signed=new Set(url.searchParams.get('X-Amz-SignedHeaders')?.split(';'));
   if(!validOrigin||url.username||url.password||url.hash||!url.searchParams.has('X-Amz-Signature')||
      !['content-length','content-type','if-none-match'].every(h=>signed.has(h))||

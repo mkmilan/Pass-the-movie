@@ -88,6 +88,33 @@ try{
   page.once('dialog',dialog=>dialog.accept());
   await button('Delete demo movie').click();
   await button('Start a movie').waitFor();
+  // A high-resolution portrait device can satisfy the browser's ideal
+  // constraints with a larger feed. Verify the actual recorded Blob is 720p.
+  const high=await context.newPage();
+  high.on('pageerror',e=>errors.push(e.message));
+  await high.addInitScript(()=>{
+    navigator.mediaDevices.getUserMedia=async()=>{
+      const canvas=document.createElement('canvas');canvas.width=1080;canvas.height=1920;
+      const ctx=canvas.getContext('2d');let tick=0;
+      const paint=()=>{ctx.fillStyle=tick++%2?'#53657a':'#ad7135';ctx.fillRect(0,0,canvas.width,canvas.height);};
+      paint();const timer=setInterval(paint,1000/30);
+      const stream=canvas.captureStream(30),track=stream.getVideoTracks()[0],stop=track.stop.bind(track);
+      track.stop=()=>{clearInterval(timer);stop();};
+      return stream;
+    };
+  });
+  try{
+    await high.goto(origin);
+    const hb=name=>high.getByRole('button',{name,exact:true});
+    await hb('Start a movie').click();await high.getByRole('checkbox').check();await hb('Continue to camera').click();
+    await hb('Open camera').click();await hb('Record 3 seconds').click({timeout:15000});
+    await high.getByText('Review your scene or retake.',{exact:true}).waitFor({timeout:45000});
+    const result=await high.locator('video[controls]').evaluate(async video=>{
+      if(!video.videoWidth)await new Promise((resolve,reject)=>{video.addEventListener('loadedmetadata',resolve,{once:true});video.addEventListener('error',reject,{once:true});});
+      return [video.videoWidth,video.videoHeight];
+    });
+    assert.deepEqual(result,[720,1280]);console.log('PASS oversized portrait camera is resized before export/upload');
+  }finally{await high.close();}
   assert.deepEqual(external,[]);assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
   console.log('PASS five recorded scenes, reference frames, retake, cancel/retry, sound, silent sample export, reset and explicit-only downloads; no media uploads');
 }finally{await browser.close();await rm(dir,{recursive:true,force:true});}
