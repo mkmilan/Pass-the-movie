@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { stat, readFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { GAME_RULES as R } from '../../packages/shared/rules.mjs';
+import { isolatedMediaCommand } from './media-sandbox.mjs';
 
 const exec = promisify(execFile);
 const inputLimits = ['-protocol_whitelist','file','-format_whitelist','mov,matroska,webm','-max_alloc','67108864','-probesize','5000000','-analyzeduration','5000000'];
@@ -39,10 +40,15 @@ export function validateSource(info, frames) {
   if(a && (!finite(a.start_time)||Math.abs(Number(a.start_time)-times[0])>0.150)) reject('MEDIA_AV_OFFSET');
   return {hasAudio:!!a,duration,frames:frames.length,width:v.width,height:v.height,codec:v.codec_name};
 }
-export function createMediaProcessor({ffmpeg='ffmpeg',ffprobe='ffprobe',timeoutMs=20000}={}) {
+export function createMediaProcessor({ffmpeg='ffmpeg',ffprobe='ffprobe',timeoutMs=20000,isolate=false,signal}={}) {
   async function run(bin,args,code='MEDIA_PROCESSING_FAILED') {
-    try { const result=await exec(bin,args,{timeout:timeoutMs,killSignal:'SIGKILL',maxBuffer:2*1024*1024,env:{PATH:process.env.PATH||'/usr/bin:/bin',LC_ALL:'C'}}); return result.stdout; }
-    catch(e) { if(e.code==='ENOENT'||e.code==='EACCES') reject('MEDIA_TOOLCHAIN_UNAVAILABLE'); if(e.killed||e.code==='ERR_CHILD_PROCESS_STDIO_MAXBUFFER') reject('MEDIA_RESOURCE_LIMIT'); reject(code); }
+    try {
+      if(signal?.aborted)reject('MEDIA_CANCELLED');
+      const command=isolate?await isolatedMediaCommand(bin,args):{file:bin,args};
+      const result=await exec(command.file,command.args,{timeout:timeoutMs,signal,killSignal:'SIGKILL',maxBuffer:2*1024*1024,env:{PATH:process.env.PATH||'/usr/bin:/bin',LC_ALL:'C'}});
+      return result.stdout;
+    }
+    catch(e) { if(signal?.aborted||e.code==='ABORT_ERR'||e.code==='MEDIA_CANCELLED')reject('MEDIA_CANCELLED'); if(e.code==='ENOENT'||e.code==='EACCES') reject('MEDIA_TOOLCHAIN_UNAVAILABLE'); if(e.killed||e.code==='ERR_CHILD_PROCESS_STDIO_MAXBUFFER') reject('MEDIA_RESOURCE_LIMIT'); reject(code); }
   }
   async function probe(path,options=[],restricted=true) {
     const out=await run(ffprobe,['-v','error',...(restricted?inputLimits:[]),'-threads','2',...options,'-of','json',path],'MEDIA_INVALID');
@@ -86,5 +92,5 @@ export function createMediaProcessor({ffmpeg='ffmpeg',ffprobe='ffprobe',timeoutM
     if(image.streams?.length!==1||frame?.codec_name!=='mjpeg'||frame.width!==720||frame.height!==1280||Number(frame.nb_read_frames)!==1) reject('MEDIA_OUTPUT_INVALID');
     return {scene,still,summary};
   }
-  return {normalizeScene,verifyScene,assembleMovie,verifyMovie};
+  return {normalizeScene,verifyScene,assembleMovie,verifyMovie,withSignal:nextSignal=>createMediaProcessor({ffmpeg,ffprobe,timeoutMs,isolate,signal:nextSignal})};
 }
