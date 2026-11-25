@@ -1,0 +1,43 @@
+name: Free preview smoke checks
+on:
+  pull_request:
+    branches: ["feat/beta-prep"]
+    paths:
+      - "preview/**"
+      - ".github/workflows/free-preview.yml"
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: preview
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --no-audit --no-fund playwright
+      - run: npx playwright install --with-deps chromium
+      - name: Install video verification tools
+        run: |
+          if ! command -v ffprobe || ! command -v ffmpeg; then sudo apt-get update && sudo apt-get install -y ffmpeg; fi
+          ffprobe -version
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Test preview using synthetic camera
+        run: |
+          npm run start -- --hostname 127.0.0.1 --port 3000 > /tmp/ptm-preview.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/ > /dev/null; then break; fi
+            sleep 1
+          done
+          node tests/smoke.mjs
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
