@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypt
 import { createInitialMovie, isMovieAccessible } from '../../packages/shared/movie-state.mjs';
 import { GAME_RULES as R } from '../../packages/shared/rules.mjs';
 import { reserveBudget } from '../../packages/server/budget.mjs';
+import { cookiePolicy, validBetaStartKey } from '../../packages/server/beta-security.mjs';
 import { activeSlot, grantMatches, turnAccessible, mayManageTurn, slotPath, resetSlotPatch, turnDeadline, inviteDeadline } from '../../packages/server/turns.mjs';
 
 export class SceneError extends Error {
@@ -13,8 +14,7 @@ const secret=()=>randomBytes(32).toString('base64url');
 const tokenOk=value=>typeof value==='string'&&/^[A-Za-z0-9_-]{43}$/.test(value);
 const csrfFor=token=>digest('csrf',token);
 function safeEqual(a,b){return typeof a==='string'&&typeof b==='string'&&a.length===b.length&&/^[a-f0-9]{64}$/.test(a)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));}
-const cookieName='ptm-dev';
-function cookie(req){
+function cookie(req,cookieName){
   const values=(req.headers.cookie||'').split(';').map(x=>x.trim()).filter(x=>x.startsWith(cookieName+'='));
   if(values.length!==1)return null;
   const value=values[0].slice(cookieName.length+1);return tokenOk(value)?value:null;
@@ -39,9 +39,10 @@ export function movieDto(movie,token,grant) {
     final:movie.status==='ready'&&slot.status==='accepted'&&movie.final?{duration:movie.final.duration,frames:movie.final.frames,bytes:movie.final.bytes,publishedAt:movie.final.publishedAt.toISOString()}:null,
     csrfToken:csrfFor(token)};
 }
-export function createSceneAccess({collections:c,client,now=()=>new Date()}) {
+export function createSceneAccess({collections:c,client,config={},now=()=>new Date()}) {
+  const policy=cookiePolicy(config);
   async function sessionFor(req) {
-    const token=cookie(req);if(!token)return null;
+    const token=cookie(req,policy.name);if(!token)return null;
     const doc=await c.sessions.findOne({tokenHash:digest('session',token),expiresAt:{$gt:now()}});
     return doc?{token,doc}:null;
   }
@@ -62,9 +63,10 @@ export function createSceneAccess({collections:c,client,now=()=>new Date()}) {
     } else await c.sessions.insertOne({tokenHash:digest('session',token),grantIds:[grantId],createdAt:t,expiresAt:until},{session});
   }
   function setCookie(res,token) {
-    res.cookie(cookieName,token,{httpOnly:true,sameSite:'lax',secure:false,path:'/',maxAge:R.collectLifetimeMs+R.readyLifetimeMs});
+    res.cookie(policy.name,token,{...policy.options,maxAge:R.collectLifetimeMs+R.readyLifetimeMs});
   }
   async function create(req,res) {
+    if(config.mode==='beta'&&!validBetaStartKey(req.body?.betaStartKey,config.startKeyHash))fail('BETA_INVITE_REQUIRED',403);
     if(req.body?.adult!==true)fail('CONSENT_REQUIRED',422);
     const browser=await prepareSession(req),personal=secret(),grantId=randomUUID(),publicId=randomUUID(),t=now();
     const movie=createInitialMovie({publicId,creatorGrantId:grantId,now:t});
