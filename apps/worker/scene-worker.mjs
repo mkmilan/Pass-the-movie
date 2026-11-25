@@ -58,13 +58,15 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
     const job=m.work,n=job.slot,p=slotPath(n),raw=m.slots[n-1].rawKey,base='movies/'+m.publicId+'/',suffix=job.jobId+'/'+job.leaseId;
     const normalizedKey=base+'normalized/'+n+'/'+suffix+'.mp4',lastFrameKey=base+'frames/'+n+'/'+suffix+'.jpg';
     let dir,accepted=false,lost=false,heartbeatBusy=false;
+    const controller=new AbortController(),processor=media.withSignal?.(controller.signal)||media;
+    const loseLease=()=>{lost=true;controller.abort();};
     const heartbeat=setInterval(async()=>{
       if(heartbeatBusy||lost)return;
       heartbeatBusy=true;
       try{
         const t=now(),r=await movies.updateOne(updateScope(m,t),{$set:{'work.leaseUntil':new Date(t.getTime()+LEASE_MS)}});
-        if(r.matchedCount!==1)lost=true;
-      }catch{lost=true;}finally{heartbeatBusy=false;}
+        if(r.matchedCount!==1)loseLease();
+      }catch{loseLease();}finally{heartbeatBusy=false;}
     },20000);
     heartbeat.unref();
     try{
@@ -72,7 +74,7 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
       dir=await mkdtemp(join(tmpdir(),'ptm-normalize-'));
       const input=join(dir,'raw.clip');await storage.get(raw,input);
       if(lost)throw new Error('LEASE_LOST');
-      const out=await media.normalizeScene(input,dir);
+      const out=await processor.normalizeScene(input,dir);
       if(lost)throw new Error('LEASE_LOST');
       await storage.put(normalizedKey,out.scene,'video/mp4');
       if(lost)throw new Error('LEASE_LOST');
