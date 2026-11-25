@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 const W=720,H=1280,MAX=12*1024*1024;
 function choices(audio){return audio?['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/mp4','video/webm','']:['video/mp4;codecs=avc1.42E01E','video/webm;codecs=vp8','video/webm;codecs=vp9','video/mp4','video/webm',''];}
 function portrait(w,h){return w>0&&h>0&&Math.abs(w/h-W/H)<0.02;}
+function needsResize(w,h){return !portrait(w,h)||w>W||h>H;}
+function safeNative(w,h){return w>0&&h>0&&w<=1920&&h<=1920&&w*h<=2100000;}
 function crop(w,h){const r=W/H;return w/h>r?[(w-h*r)/2,0,h*r,h]:[0,(h-w/r)/2,w,w/r];}
 export default function CameraCapture({onTake,disabled=false}) {
   const video=useRef(null),alive=useRef(true),camera=useRef(null),capture=useRef(null),recorder=useRef(null),timer=useRef(null),raf=useRef(null),epoch=useRef(0),url=useRef(null),cancelled=useRef(false),recordingSize=useRef(null);
@@ -49,7 +51,8 @@ export default function CameraCapture({onTake,disabled=false}) {
       video.current.srcObject=s;await video.current.play();
       if(ticket!==epoch.current||!alive.current){s.getTracks().forEach(t=>t.stop());return;}
       const w=video.current.videoWidth,h=video.current.videoHeight;
-      const needsCrop=!portrait(w,h);
+      const needsCrop=needsResize(w,h);
+      if(!safeNative(w,h)&&typeof HTMLCanvasElement.prototype.captureStream!=='function'){interrupt('Camera resolution is too high. Use a lower-resolution camera mode or another browser.');return;}
       setFit(needsCrop&&typeof HTMLCanvasElement.prototype.captureStream!=='function'?'contain':'cover');
       setMode('preview');setMessage(needsCrop&&typeof HTMLCanvasElement.prototype.captureStream!=='function'?'Native camera framing; the preview export fits it into portrait.':'Ready to record.');
     }catch{if(alive.current&&ticket===epoch.current){stopTracks();setMode('idle');setMessage('Camera unavailable. Check permissions and retry.');}}
@@ -69,7 +72,7 @@ export default function CameraCapture({onTake,disabled=false}) {
     recordingSize.current=[w,h];
     let stream=s;
     try{
-      if(!portrait(w,h)&&typeof HTMLCanvasElement.prototype.captureStream==='function'){
+      if(needsResize(w,h)&&typeof HTMLCanvasElement.prototype.captureStream==='function'){
         const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
         const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw Error();
         const rect=crop(w,h);ctx.drawImage(v,...rect,0,0,W,H);stream=canvas.captureStream(30);
@@ -81,6 +84,7 @@ export default function CameraCapture({onTake,disabled=false}) {
           raf.current=requestAnimationFrame(draw);
         };raf.current=requestAnimationFrame(draw);
       }
+      if(stream===s&&!safeNative(w,h)){interrupt('Camera resolution is too high. Please use another browser.');return;}
       capture.current=stream;
       const audio=stream.getAudioTracks().length>0;
       for(const mime of choices(audio)){

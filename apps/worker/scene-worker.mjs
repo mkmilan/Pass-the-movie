@@ -33,13 +33,13 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
       const slot=activeSlot(m),raw=slot?.rawKey;
       if(!raw||slot.status!=='uploading'||slot.uploadStartedAt>stale)continue;
       const p=slotPath(slot.number);
-      await movies.updateOne({_id:m._id,revision:m.revision,status:'collecting',activeSlot:slot.number,[p+'status']:'uploading'},{$set:{[p+'status']:'retryable',[p+'rawKey']:null,[p+'errorCode']:'UPLOAD_INTERRUPTED'},$addToSet:{cleanupPending:raw},$inc:{revision:1}});
+      await movies.updateOne({_id:m._id,revision:m.revision,status:'collecting',activeSlot:slot.number,[p+'status']:'uploading'},{$set:{[p+'status']:'retryable',[p+'rawKey']:null,[p+'rawETag']:null,[p+'errorCode']:'UPLOAD_INTERRUPTED'},$addToSet:{cleanupPending:raw},$inc:{revision:1}});
     }
     const exhausted=await movies.find({status:'collecting','work.type':'normalize','work.status':'running','work.attempt':{$gte:MAX_ATTEMPTS},'work.leaseUntil':{$lte:t}}).limit(10).toArray();
     for(const m of exhausted){
       const slot=activeSlot(m),raw=slot?.rawKey;if(!raw||slot.number!==m.work.slot||slot.status!=='queued')continue;
       const p=slotPath(slot.number);
-      await movies.updateOne({_id:m._id,revision:m.revision,status:'collecting',activeSlot:slot.number,'work.leaseId':m.work.leaseId,'work.leaseUntil':{$lte:t}},{$set:{[p+'status']:'retryable',[p+'rawKey']:null,[p+'errorCode']:'MEDIA_PROCESSING_RETRY',work:null},$addToSet:{cleanupPending:raw},$inc:{revision:1}});
+      await movies.updateOne({_id:m._id,revision:m.revision,status:'collecting',activeSlot:slot.number,'work.leaseId':m.work.leaseId,'work.leaseUntil':{$lte:t}},{$set:{[p+'status']:'retryable',[p+'rawKey']:null,[p+'rawETag']:null,[p+'errorCode']:'MEDIA_PROCESSING_RETRY',work:null},$addToSet:{cleanupPending:raw},$inc:{revision:1}});
     }
     // An expired idle claim releases the turn; active uploads and queued work
     // retain their bounded processing reservation. Slot generation fences stale grants.
@@ -72,7 +72,7 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
     try{
       if(!raw)throw new Error('RAW_OBJECT_MISSING');
       dir=await mkdtemp(join(tmpdir(),'ptm-normalize-'));
-      const input=join(dir,'raw.clip');await storage.get(raw,input);
+      const input=join(dir,'raw.clip');await storage.get(raw,input,{etag:m.slots[n-1].rawETag||undefined});
       if(lost)throw new Error('LEASE_LOST');
       const out=await processor.normalizeScene(input,dir);
       if(lost)throw new Error('LEASE_LOST');
@@ -85,7 +85,7 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
         ? {[slotPath(n+1)+'status']:'open',activeSlot:n+1,work:null}
         : {status:'assembling',activeSlot:null,work:{jobId:randomUUID(),type:'assemble',slot:null,generation:null,status:'pending',attempt:0,nextRunAt:t,leaseId:null,leaseUntil:null,lastErrorCode:null}};
       const commit=await movies.updateOne(updateScope(m,t),{$set:{
-        [p+'status']:'accepted',[p+'acceptedAt']:t,[p+'normalizedKey']:normalizedKey,[p+'lastFrameKey']:lastFrameKey,[p+'mediaSummary']:out.summary,[p+'rawKey']:null,[p+'errorCode']:null,...next
+        [p+'status']:'accepted',[p+'acceptedAt']:t,[p+'normalizedKey']:normalizedKey,[p+'lastFrameKey']:lastFrameKey,[p+'mediaSummary']:out.summary,[p+'rawKey']:null,[p+'rawETag']:null,[p+'errorCode']:null,...next
       },$addToSet:{cleanupPending:raw},$inc:{revision:1}});
       accepted=commit.modifiedCount===1;
     }catch(e){
@@ -95,7 +95,7 @@ export function createSceneWorker({collections:{movies,grants},storage,media=cre
         if(!permanent.has(code)&&job.attempt<MAX_ATTEMPTS){
           await movies.updateOne(updateScope(m,t),{$set:{'work.status':'pending','work.leaseId':null,'work.leaseUntil':null,'work.nextRunAt':new Date(t.getTime()+1000*2**job.attempt),'work.lastErrorCode':code},$inc:{revision:1}});
         }else{
-          const patch={$set:{[p+'status']:'retryable',[p+'errorCode']:code,[p+'rawKey']:null,work:null},$inc:{revision:1}};
+          const patch={$set:{[p+'status']:'retryable',[p+'errorCode']:code,[p+'rawKey']:null,[p+'rawETag']:null,work:null},$inc:{revision:1}};
           if(raw)patch.$addToSet={cleanupPending:raw};
           await movies.updateOne(updateScope(m,t),patch);
         }

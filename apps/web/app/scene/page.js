@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import CameraCapture from './camera';
 import FinalReveal from './final-reveal';
-import { browserApiBase as apiBase, betaBrowser, fetchPrivateMedia } from './api';
+import { browserApiBase as apiBase, betaBrowser, fetchPrivateMedia, sendDirectClip } from './api';
 
 const initialConsent={adult:false,permissions:false,combineAndDownload:false,externalSharing:false};
 const consentLabels={
@@ -126,7 +126,7 @@ export default function ScenePage(){
     await action(async()=>{
       setProgress(0);if(!attempt.current)attempt.current=crypto.randomUUID();
       try{
-        await sendClip(movie,blob,attempt.current,consent,p=>{if(active.current)setProgress(p);});
+        await (beta||process.env.NEXT_PUBLIC_PTM_DIRECT_UPLOADS==='true'?sendDirectClip:sendClip)(movie,blob,attempt.current,consent,p=>{if(active.current)setProgress(p);});
         const data=await request(scoped(path,slot));if(active.current){setMovie(data);if(data.myScene.status==='retryable'){setBlob(null);attempt.current=null;}}
       }catch(e){
         try{const data=await request(scoped(path,slot));if(active.current){setMovie(data);if(data.myScene.status==='retryable'){setBlob(null);attempt.current=null;}}}catch{}
