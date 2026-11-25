@@ -1,0 +1,13 @@
+**/node_modules
+**/.next
+.git
+.github
+.env
+.env.*
+**/.env
+**/.env.*
+*.mp4
+*.webm
+*.mov
+spike/
+docs/
