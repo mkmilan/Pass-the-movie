@@ -14,7 +14,7 @@
     "dev:api": "npm run dev --workspace @ptm/api",
     "build:web": "npm run build --workspace @ptm/web",
     "check:media": "npm run check --workspace @ptm/worker",
-    "test:media": "node --test apps/worker/media.test.mjs",
+    "test:media": "node --test apps/worker/media.test.mjs apps/worker/media-sandbox.test.mjs",
     "dev:worker": "npm run dev --workspace @ptm/worker",
     "check:cloud": "node --env-file-if-exists=.env apps/api/cloud-preflight.mjs"
   },
