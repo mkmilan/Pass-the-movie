@@ -15,9 +15,12 @@
     "build:web": "npm run build --workspace @ptm/web",
     "check:media": "npm run check --workspace @ptm/worker",
     "test:media": "node --test apps/worker/media.test.mjs",
-    "dev:worker": "npm run dev --workspace @ptm/worker"
+    "dev:worker": "npm run dev --workspace @ptm/worker",
+    "check:cloud": "node --env-file-if-exists=.env scripts/cloud-preflight.mjs"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.900.0"
+    "@aws-sdk/client-s3": "^3.900.0",
+    "@aws-sdk/s3-request-presigner": "^3.900.0",
+    "tldts": "^7.0.0"
   }
 }
