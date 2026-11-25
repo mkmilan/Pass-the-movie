@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { cloudConfig } from '../../packages/server/cloud-config.mjs';
 import { singleSceneConfig } from '../../packages/server/single-scene-config.mjs';
 import { createStorage } from '../../packages/server/storage.mjs';
 import { sceneCollections, ensureSceneIndexes } from '../../packages/server/scene-db.mjs';
@@ -11,7 +12,7 @@ let stopping=false, storage;
 process.once('SIGINT',()=>{stopping=true;});
 process.once('SIGTERM',()=>{stopping=true;});
 try{
-  const config=singleSceneConfig(process.env);
+  const config=cloudConfig(process.env)||singleSceneConfig(process.env);
   if(!config)throw new Error('SINGLE_SCENE_DEV_ONLY');
   await mongoose.connect(config.mongodbUri,{serverSelectionTimeoutMS:5000,maxPoolSize:5});
   const collections=sceneCollections(mongoose.connection.db);
@@ -21,11 +22,12 @@ try{
   const worker=createSceneWorker({collections,storage,media});
   const retention=createRetentionWorker({collections,storage});
   let nextRetention=0;
-  console.log('Local movie worker started');
+  const canProcess=config.mode!=='beta';
+  console.log(canProcess?'Local movie worker started':'Cloud staging retention-only worker started');
   while(!stopping){
     try{
       if(Date.now()>=nextRetention){nextRetention=Date.now()+30000;await retention.tick();}
-      if(!await worker.runOne())await sleep(1000);
+      if(!canProcess||!await worker.runOne())await sleep(1000);
     }
     catch{console.error('WORKER_RETRY');await sleep(2000);}
   }
