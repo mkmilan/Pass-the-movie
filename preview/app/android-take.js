@@ -100,7 +100,7 @@ export async function prepareAndroidTake(player,stream,width,height,rect){
         if(cancelled)return;
         finishing=true;cancelAnimationFrame(frame);
         try{
-          mic?.stop();enqueue(SECONDS-FRAME);releaseInput();onFinishing();
+          mic?.stop();enqueue(SECONDS-FRAME);onFinishing();releaseInput();
           watchdog=setTimeout(()=>fail(Error('The phone could not finish saving this take.')),12000);
           await pending;
           if(cancelled)return;

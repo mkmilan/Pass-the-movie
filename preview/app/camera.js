@@ -26,11 +26,12 @@ export default function CameraCapture({onTake,disabled=false,children}) {
   const [mode,setMode]=useState('idle'),[facing,setFacing]=useState('user'),[mic,setMic]=useState(true),[message,setMessage]=useState('Open your camera when ready.'),[review,setReview]=useState(null),[fit,setFit]=useState('cover');
   const busy=mode==='opening'||mode==='recording'||mode==='finishing';
   function stopTracks(){
+    const source=camera.current;camera.current=null;
     androidTake.current?.cancel();androidTake.current=null;
     cancelAnimationFrame(raf.current);raf.current=null;
-    if(capture.current&&capture.current!==camera.current)capture.current.getVideoTracks().forEach(t=>t.stop());
+    if(capture.current&&capture.current!==source)capture.current.getVideoTracks().forEach(t=>t.stop());
     capture.current=null;framingSize.current=null;
-    camera.current?.getTracks().forEach(t=>t.stop());camera.current=null;
+    source?.getTracks().forEach(t=>t.stop());
     if(video.current)video.current.srcObject=null;
   }
   function releaseReview(){if(url.current)URL.revokeObjectURL(url.current);url.current=null;setReview(null);}
@@ -147,7 +148,8 @@ export default function CameraCapture({onTake,disabled=false,children}) {
         if(ticket!==epoch.current)return;
         setMode('finishing');setMessage('Saving your scene…');
         framingSize.current=null;
-        camera.current?.getTracks().forEach(track=>track.stop());
+        const source=camera.current;camera.current=null;
+        source?.getTracks().forEach(track=>track.stop());
       }).then(blob=>{
         if(ticket!==epoch.current||!alive.current)return;
         androidTake.current=null;stopTracks();reviewBlob(blob);
