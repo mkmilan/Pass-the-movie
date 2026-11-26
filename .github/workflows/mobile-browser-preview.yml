@@ -5,6 +5,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  CAMERA_CHECK: ${{ contains(github.event.head_commit.message, '[camera check]') }}
 jobs:
   iphone:
     if: "!contains(github.event.head_commit.message, '[android only]')"
@@ -46,7 +48,7 @@ jobs:
           trap 'cat "$RUNNER_TEMP/safaridriver.log"' EXIT
           node preview/tests/mobile/run.mjs ios
       - name: Decode the exported video
-        if: "!cancelled() && hashFiles('mobile-test-results/*pass-the-movie-*') != ''"
+        if: "!cancelled() && hashFiles('mobile-test-results/*pass-the-movie*') != ''"
         run: |
           if ! command -v ffprobe; then brew install ffmpeg; fi
           python3 preview/tests/mobile/verify.py
@@ -107,7 +109,7 @@ jobs:
           ln -s "$RUNNER_TEMP/mobile/node_modules" preview/tests/mobile/node_modules
           node preview/tests/mobile/run.mjs android
       - name: Decode the exported video
-        if: "!cancelled() && hashFiles('mobile-test-results/*pass-the-movie-*') != ''"
+        if: "!cancelled() && hashFiles('mobile-test-results/*pass-the-movie*') != ''"
         run: |
           if ! command -v ffprobe; then sudo apt-get update && sudo apt-get install -y ffmpeg; fi
           python3 preview/tests/mobile/verify.py

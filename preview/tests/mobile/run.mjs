@@ -53,6 +53,17 @@ async function iphone() {
         el.addEventListener('click',()=>{el.dataset.mobileTestTap='delivered';},{once:true});
         return el;
       },label),label);
+      if(label==='Open camera' && process.env.NATIVE_IOS==='1'){
+        try{
+          axe(['tap','--label',label,'--udid',process.env.SIMULATOR_UDID]);
+          if(await js(()=>!document.querySelector('[data-mobile-test-tap="pending"]:not([disabled])')))return;
+        }catch(e){console.log('Using Safari touch action:',e.message);}
+        const coordinate=await js(el=>{const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};},element);
+        await command('POST',id+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[
+          {type:'pointerMove',duration:0,...coordinate},{type:'pointerDown',button:0},{type:'pointerUp',button:0}
+        ]}]});
+        return;
+      }
       await command('POST',id+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
       await pause(250);
       const missed=await js(text=>{
@@ -81,18 +92,26 @@ async function android() {
   };
 }
 
-async function recordScenes(driver) {
+async function recordScenes(driver, cameraOnly=false) {
   // Used only inside this test tab. Each tap opens a synthetic moving camera
   // and tone so the unmodified page still records and assembles actual clips.
   await driver.evaluate(() => {
-    let scene = 0;
+    let scene = 0, tap=Infinity;
+    document.addEventListener('click',e=>{
+      if(e.target.closest('button')?.textContent==='Record 3 seconds')tap=performance.now();
+    },true);
+    const start=MediaRecorder.prototype.start;
+    MediaRecorder.prototype.start=function(...args){
+      window.tapDelay=performance.now()-tap;
+      return start.apply(this,args);
+    };
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {configurable:true, value:async constraints=>{
       const canvas = document.createElement('canvas');
       canvas.width=360; canvas.height=640;
       const ctx=canvas.getContext('2d');
       const color=['#ee4045','#1ec87a','#429dff','#efc340','#d65bda'][scene++ % 5];
       let frame=0;
-      const paint=()=>{ctx.fillStyle=color;ctx.fillRect(0,0,360,640);ctx.fillStyle='white';ctx.fillRect(frame++ % 300,320,50,50);};
+      const paint=()=>{ctx.fillStyle=(scene===1 && performance.now()<tap+600)?'#17213c':color;ctx.fillRect(0,0,360,640);ctx.fillStyle='white';ctx.fillRect(frame++ % 300,320,50,50);};
       paint();
       const interval=setInterval(paint,1000/30);
       const stream=canvas.captureStream(30);
@@ -114,7 +133,13 @@ async function recordScenes(driver) {
     await until(()=>driver.evaluate(()=>!!document.querySelector('input[type=checkbox]')),'recording consent');
     await driver.evaluate(()=>document.querySelector('input[type=checkbox]').click());
     await driver.tap('Continue to camera');
-    await driver.evaluate(()=>{const mic=document.querySelector('input[type=checkbox]');if(!mic.checked)mic.click();});
+    assert.ok(await driver.evaluate(()=>document.querySelector('input[aria-label="Mic"]')?.checked),'microphone on by default');
+    const checkFit=async()=>assert.deepEqual(await driver.evaluate(()=>[...document.querySelectorAll('main button,main a,main input')].filter(el=>{
+      if(!el.getClientRects().length)return false;
+      const r=el.getBoundingClientRect(),viewport=window.visualViewport;
+      return r.top<(viewport?.offsetTop??0)-1 || r.bottom>(viewport?.height??innerHeight)+(viewport?.offsetTop??0)+1 || r.right>innerWidth+1 || r.left< -1;
+    }).map(el=>el.textContent||el.getAttribute('aria-label'))),[]);
+    await checkFit();
     await driver.tap('Open camera');
     await driver.tap('Record 3 seconds');
     await until(()=>driver.evaluate(()=>document.querySelector('video[controls]')?.readyState>=2), 'review video');
@@ -122,6 +147,22 @@ async function recordScenes(driver) {
       const v=document.querySelector('video[controls]');
       return {duration:String(v.duration),width:v.videoWidth,height:v.videoHeight,ready:v.readyState};
     }));
+    const latency=await driver.evaluate(()=>window.tapDelay);
+    assert.ok(latency>=0 && latency<200,'tap-to-recorder delay: '+latency);
+    await checkFit();
+    if(cameraOnly){
+      console.log('Tap-to-recorder delay:',latency,'ms');
+      await driver.screenshot(resolve(output,platform+'-camera.png'));
+      await driver.evaluate(()=>{
+        fetch(document.querySelector('video[controls]').src).then(r=>r.blob()).then(blob=>{
+          const reader=new FileReader();reader.onload=()=>{window.cameraBytes=reader.result.split(',')[1];};reader.readAsDataURL(blob);
+        });
+      });
+      const length=await until(()=>driver.evaluate(()=>window.cameraBytes?.length),'recording bytes'),parts=[];
+      for(let i=0;i<length;i+=65536)parts.push(await driver.evaluate(i=>window.cameraBytes.slice(i,i+65536),i));
+      await writeFile(resolve(output,'take-pass-the-movie.video'),Buffer.from(parts.join(''),'base64'));
+      return;
+    }
     await driver.tap('Use this scene');
     if(scene<5) await driver.tap("I'm the next player");
     console.log('Accepted recorded scene',scene);
@@ -149,7 +190,8 @@ try {
     recorder:typeof MediaRecorder, canvas:typeof HTMLCanvasElement.prototype.captureStream,
     share:typeof navigator.share, canShare:typeof navigator.canShare, width:innerWidth, height:innerHeight
   })));
-  for(const mode of ['sample', 'recorded']){
+  if(process.env.CAMERA_CHECK==='true')await recordScenes(driver,true);
+  else for(const mode of ['sample', 'recorded']){
     if(mode==='sample'){
       const sampleLabel='Try with five sample scenes';
       await driver.tap(sampleLabel);

@@ -26,6 +26,17 @@ def verify(movie, recorded):
             segment=samples[second*8000:(second+1)*8000]
             assert sum(v*v for v in segment)/len(segment) > 100**2, f"silent scene at {second}s"
     print(f"{movie.name}: {video['codec_name']}, 720×1280, {seconds:.2f}s, {len(frames)} decoded frames, five distinct scenes, audio={recorded}", flush=True)
-for mode in ("sample","recorded"):
-    movie, = Path("mobile-test-results").glob(mode+"-pass-the-movie-*")
-    verify(movie, mode == "recorded")
+take = Path("mobile-test-results/take-pass-the-movie.video")
+if take.exists():
+    cmd = ["ffmpeg","-nostdin","-v","error","-i",str(take)]
+    def color_at(t):
+        return tuple(subprocess.check_output([*cmd,"-ss",t,"-frames:v","1","-vf","scale=1:1","-pix_fmt","rgb24","-f","rawvideo","-"]))
+    first, middle = color_at("0"), color_at("1.5")
+    assert len(first)==3 and first[2]>first[0] and middle[0]>2*middle[2], (first,middle)
+    samples=array.array("h",subprocess.check_output([*cmd,"-t","0.6","-map","0:a:0","-ar","8000","-ac","1","-f","s16le","-"]))
+    assert samples and sum(v*v for v in samples)/len(samples)>100**2, "Opening audio is silent"
+    print(f"Opening cue {first}, middle cue {middle}, audible mic in the opening 0.6s.",flush=True)
+else:
+    for mode in ("sample","recorded"):
+        movie, = Path("mobile-test-results").glob(mode+"-pass-the-movie-*")
+        verify(movie, mode == "recorded")
