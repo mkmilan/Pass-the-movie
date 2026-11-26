@@ -36,7 +36,7 @@ async function iphone() {
   }
   await until(() => fetch('http://127.0.0.1:4444/status').then(r=>r.ok).catch(()=>false), 'SafariDriver');
   const session = await command('POST','/session',{capabilities:{alwaysMatch:{
-    browserName:'Safari',platformName:'iOS','safari:useSimulator':true,'safari:deviceUDID':process.env.SIMULATOR_UDID
+    browserName:'Safari',platformName:'iOS','webkit:alwaysAllowAutoplay':true,'safari:useSimulator':true,'safari:deviceUDID':process.env.SIMULATOR_UDID
   }}});
   id = '/session/' + session.sessionId;
   console.log('Safari capabilities:', session.capabilities);
@@ -53,17 +53,6 @@ async function iphone() {
         el.addEventListener('click',()=>{el.dataset.mobileTestTap='delivered';},{once:true});
         return el;
       },label),label);
-      if(label==='Open camera' && process.env.NATIVE_IOS==='1'){
-        try{
-          axe(['tap','--label',label,'--udid',process.env.SIMULATOR_UDID]);
-          if(await js(()=>!document.querySelector('[data-mobile-test-tap="pending"]:not([disabled])')))return;
-        }catch(e){console.log('Using Safari touch action:',e.message);}
-        const coordinate=await js(el=>{const r=el.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)};},element);
-        await command('POST',id+'/actions',{actions:[{type:'pointer',id:'finger',parameters:{pointerType:'touch'},actions:[
-          {type:'pointerMove',duration:0,...coordinate},{type:'pointerDown',button:0},{type:'pointerUp',button:0}
-        ]}]});
-        return;
-      }
       await command('POST',id+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
       await pause(250);
       const missed=await js(text=>{
