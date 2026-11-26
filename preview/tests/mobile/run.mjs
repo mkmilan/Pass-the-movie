@@ -83,6 +83,11 @@ async function android() {
   const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
   const context = browser.contexts()[0];
   const page = await context.newPage();
+  // Load the deployed preview through the runner when the emulator boots offline.
+  await page.route(origin+'**',async route=>{
+    const response=await context.request.get(route.request().url(),{timeout:30000});
+    try{await route.fulfill({response});}finally{await response.dispose();}
+  });
   return {
     evaluate: (fn,...args) => page.evaluate(fn, args[0]),
     navigate: () => page.goto(origin),
