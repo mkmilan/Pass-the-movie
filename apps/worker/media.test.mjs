@@ -40,3 +40,6 @@ test('normalizes mixed native formats and rejects invalid inputs', {timeout:1200
     await assert.rejects(createMediaProcessor({ffprobe:'/nonexistent/ffprobe'}).normalizeScene(portrait,fail),{code:'MEDIA_TOOLCHAIN_UNAVAILABLE'});
   } finally { await rm(dir,{recursive:true,force:true}); }
 });
+
+// Run optimization regressions in the existing media and container test jobs.
+import './media-optimization.test.mjs';
