@@ -14,7 +14,14 @@ function landscapeNow(){
   if(type)return type.startsWith('landscape');
   return Math.abs(Number(window.orientation))===90;
 }
-function choices(audio){return audio?['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/mp4','video/webm','']:['video/mp4;codecs=avc1.42E01E','video/webm;codecs=vp8','video/webm;codecs=vp9','video/mp4','video/webm',''];}
+function choices(audio){
+  const avc=audio?'video/mp4;codecs=avc1.42E01E,mp4a.40.2':'video/mp4;codecs=avc1.42E01E';
+  const vp8=audio?'video/webm;codecs=vp8,opus':'video/webm;codecs=vp8';
+  const vp9=audio?'video/webm;codecs=vp9,opus':'video/webm;codecs=vp9';
+  // Some Android AVC encoders deliver buffered frames long after the tap.
+  const preferred=/Android/i.test(navigator.userAgent)?[vp8,avc]:[avc,vp8];
+  return [...preferred,vp9,'video/mp4','video/webm',''];
+}
 function portrait(w,h){return w>0&&h>0&&Math.abs(w/h-W/H)<0.02;}
 function needsResize(w,h){return !portrait(w,h)||w>W||h>H;}
 function safeNative(w,h){return w>0&&h>0&&w<=1920&&h<=1920&&w*h<=2100000;}
