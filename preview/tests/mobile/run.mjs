@@ -80,6 +80,7 @@ async function android() {
   const {chromium} = await import('playwright-core');
   const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
   const context = browser.contexts()[0];
+  await context.grantPermissions(['camera','microphone'],{origin:new URL(origin).origin});
   const page = await context.newPage();
   // Load the deployed preview through the runner when the emulator boots offline.
   await page.route(origin+'**',async route=>{
@@ -93,6 +94,30 @@ async function android() {
     screenshot: file => writeFile(file,execFileSync('adb',['exec-out','screencap','-p'],{timeout:10000,maxBuffer:10000000})),
     close: () => browser.close()
   };
+}
+
+async function readTake(driver,name){
+  await driver.evaluate(()=>{
+    fetch(document.querySelector('video[controls]').src).then(r=>r.blob()).then(blob=>{
+      const reader=new FileReader();
+      reader.onload=()=>{window.cameraBytes=reader.result.split(',')[1];};
+      reader.readAsDataURL(blob);
+    });
+  });
+  const length=await until(()=>driver.evaluate(()=>window.cameraBytes?.length),'recording bytes'),parts=[];
+  for(let i=0;i<length;i+=65536)parts.push(await driver.evaluate(i=>window.cameraBytes.slice(i,i+65536),i));
+  await writeFile(resolve(output,name),Buffer.from(parts.join(''),'base64'));
+}
+
+async function androidDeviceTake(driver){
+  await driver.tap('Start a movie');
+  await driver.evaluate(()=>document.querySelector('input[type=checkbox]').click());
+  await driver.tap('Continue to camera');
+  await driver.tap('Open camera');
+  await driver.tap('Record 3 seconds');
+  await until(()=>driver.evaluate(()=>document.querySelector('video[controls]')?.readyState>=2),'Android device review video');
+  await readTake(driver,'device-pass-the-movie.video');
+  console.log('Saved Android device-input recording for decoding');
 }
 
 async function recordScenes(driver, cameraOnly=false) {
@@ -168,14 +193,7 @@ async function recordScenes(driver, cameraOnly=false) {
       console.log('Tap to recorder start / stop:',latency,stop,'ms');
       assert.ok(stop>=2900 && stop<3400,'three-second stop timer: '+stop);
       await driver.screenshot(resolve(output,platform+'-camera.png'));
-      await driver.evaluate(()=>{
-        fetch(document.querySelector('video[controls]').src).then(r=>r.blob()).then(blob=>{
-          const reader=new FileReader();reader.onload=()=>{window.cameraBytes=reader.result.split(',')[1];};reader.readAsDataURL(blob);
-        });
-      });
-      const length=await until(()=>driver.evaluate(()=>window.cameraBytes?.length),'recording bytes'),parts=[];
-      for(let i=0;i<length;i+=65536)parts.push(await driver.evaluate(i=>window.cameraBytes.slice(i,i+65536),i));
-      await writeFile(resolve(output,'take-pass-the-movie.video'),Buffer.from(parts.join(''),'base64'));
+      await readTake(driver,'take-pass-the-movie.video');
       return;
     }
     await driver.tap('Use this scene');
@@ -205,7 +223,14 @@ try {
     recorder:typeof MediaRecorder, canvas:typeof HTMLCanvasElement.prototype.captureStream,
     share:typeof navigator.share, canShare:typeof navigator.canShare, width:innerWidth, height:innerHeight
   })));
-  if(process.env.CAMERA_CHECK==='true')await recordScenes(driver,true);
+  if(process.env.CAMERA_CHECK==='true'){
+    if(platform==='android'){
+      try{await androidDeviceTake(driver);}catch(e){console.log('Android device input unavailable:',e.message);}
+      await driver.navigate();
+      await until(()=>driver.evaluate(()=>Object.keys(document.querySelector('main button')||{}).some(key=>key.startsWith('__reactProps$'))),'hydration');
+    }
+    await recordScenes(driver,true);
+  }
   else for(const mode of ['sample', 'recorded']){
     if(mode==='sample'){
       const sampleLabel='Try with five sample scenes';

@@ -101,8 +101,10 @@ jobs:
           adb shell getprop ro.build.version.release
           adb shell input keyevent 82
           adb shell pm path com.android.chrome | grep package:
+          adb shell pm grant com.android.chrome android.permission.CAMERA
+          adb shell pm grant com.android.chrome android.permission.RECORD_AUDIO
           adb shell am set-debug-app --persistent com.android.chrome
-          adb shell "echo 'chrome --disable-fre --no-first-run --no-default-browser-check' > /data/local/tmp/chrome-command-line"
+          adb shell "echo 'chrome --disable-fre --no-first-run --no-default-browser-check --use-fake-device-for-media-stream --use-fake-ui-for-media-stream' > /data/local/tmp/chrome-command-line"
           adb shell am start -a android.intent.action.VIEW -d about:blank -n com.android.chrome/com.google.android.apps.chrome.Main
           adb forward tcp:9222 localabstract:chrome_devtools_remote
           for n in {1..45}; do if curl -fsS http://127.0.0.1:9222/json/version; then break; fi; sleep 2; done

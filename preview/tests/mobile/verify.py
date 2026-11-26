@@ -27,6 +27,12 @@ def verify(movie, recorded):
             assert sum(v*v for v in segment)/len(segment) > 100**2, f"silent scene at {second}s"
     print(f"{movie.name}: {video['codec_name']}, 720×1280, {seconds:.2f}s, {len(frames)} decoded frames, five distinct scenes, audio={recorded}", flush=True)
 take = Path("mobile-test-results/take-pass-the-movie.video")
+device = Path("mobile-test-results/device-pass-the-movie.video")
+if device.exists():
+    for kind in ("v","a"):
+        info=json.loads(subprocess.check_output(["ffprobe","-v","error","-select_streams",kind+":0","-show_frames","-show_entries","frame=best_effort_timestamp_time","-of","json",str(device)]))
+        ts=[float(f["best_effort_timestamp_time"]) for f in info["frames"]]
+        print(f"Android device-input {kind}: {len(ts)} frames, {ts[0]:.3f}s to {ts[-1]:.3f}s",flush=True)
 if take.exists():
     cmd = ["ffmpeg","-nostdin","-v","error","-i",str(take)]
     frames=json.loads(subprocess.check_output(["ffprobe","-v","error","-select_streams","v:0","-show_frames","-show_entries","frame=best_effort_timestamp_time","-of","json",str(take)]))["frames"]
