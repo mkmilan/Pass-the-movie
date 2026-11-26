@@ -33,6 +33,7 @@ if device.exists():
         info=json.loads(subprocess.check_output(["ffprobe","-v","error","-select_streams",kind+":0","-show_frames","-show_entries","frame=best_effort_timestamp_time","-of","json",str(device)]))
         ts=[float(f["best_effort_timestamp_time"]) for f in info["frames"]]
         print(f"Android device-input {kind}: {len(ts)} frames, {ts[0]:.3f}s to {ts[-1]:.3f}s",flush=True)
+        assert len(ts)>2 and -.1<=ts[0]<.3 and 2.45<=ts[-1]<=3.3, (kind,len(ts),ts[:1],ts[-1:])
 if take.exists():
     cmd = ["ffmpeg","-nostdin","-v","error","-i",str(take)]
     frames=json.loads(subprocess.check_output(["ffprobe","-v","error","-select_streams","v:0","-show_frames","-show_entries","frame=best_effort_timestamp_time","-of","json",str(take)]))["frames"]
