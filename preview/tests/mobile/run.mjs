@@ -64,7 +64,7 @@ async function android() {
     evaluate: (fn,...args) => page.evaluate(fn, args[0]),
     navigate: () => page.goto(origin),
     tap: label => page.getByRole('button',{name:label,exact:true}).click({timeout:35000}),
-    screenshot: file => page.screenshot({path:file}),
+    screenshot: file => writeFile(file,execFileSync('adb',['exec-out','screencap','-p'],{timeout:10000,maxBuffer:10000000})),
     close: () => browser.close()
   };
 }
@@ -119,6 +119,15 @@ async function recordScenes(driver) {
 const driver = platform === 'ios' ? await iphone() : await android();
 try {
   await driver.navigate();
+  if(platform==='ios' && process.env.NATIVE_IOS==='1'){
+    const udid=process.env.SIMULATOR_UDID;
+    const ui=execFileSync('axe',['describe-ui','--udid',udid],{encoding:'utf8',timeout:30000});
+    if(/View Bookmarks|You can now view these items/i.test(ui)){
+      console.log('Dismissing first-launch Safari feature tip');
+      // iPhone SE layout: native tip close control (confirmed in the simulator capture).
+      execFileSync('axe',['tap','-x','337','-y','413','--udid',udid],{timeout:20000});
+    }
+  }
   await until(()=>driver.evaluate(()=>document.body?.innerText.includes('Try with five sample scenes')),'preview');
   await until(()=>driver.evaluate(()=>{
     const b=document.querySelector('main button');
@@ -130,56 +139,78 @@ try {
     share:typeof navigator.share, canShare:typeof navigator.canShare, width:innerWidth, height:innerHeight
   })));
   for(const mode of ['sample', 'recorded']){
-  if(mode==='sample'){
-    const sampleLabel='Try with five sample scenes';
-    await driver.tap(sampleLabel);
-    await pause(1000);
-    if(platform==='ios' && await driver.evaluate(text=>[...document.querySelectorAll('button')].some(b=>b.textContent===text),sampleLabel)){
-      console.log('Retrying sample selection through the hydrated button handler.');
-      await driver.evaluate(text=>[...document.querySelectorAll('button')].find(b=>b.textContent===text).click(),sampleLabel);
+    if(mode==='sample'){
+      const sampleLabel='Try with five sample scenes';
+      await driver.tap(sampleLabel);
+      await pause(1000);
+      if(platform==='ios' && await driver.evaluate(text=>[...document.querySelectorAll('button')].some(b=>b.textContent===text),sampleLabel)){
+        console.log('Retrying sample selection through the hydrated button handler.');
+        await driver.evaluate(text=>[...document.querySelectorAll('button')].find(b=>b.textContent===text).click(),sampleLabel);
+      }
     }
-  }
-  else {
-    await driver.tap('Make another movie');
-    await recordScenes(driver);
-  }
-  await driver.tap('Reveal the movie');
-  await until(()=>driver.evaluate(()=>{
-    const error=document.querySelector('[role="alert"]');
-    if(error) throw Error(error.innerText);
-    return !!document.querySelector('a[download][href^="blob:"]');
-  }),'rendered movie',65000);
-  const media = await driver.evaluate(()=>{
-    const link=document.querySelector('a[download]');
-    const video=document.querySelector('video[controls]');
-    return {filename:link.download, player:video?.getAttribute('src')===link.getAttribute('href'),
-      shareButton:[...document.querySelectorAll('button')].some(b=>b.textContent==='Share video')};
-  });
-  assert.ok(media.player);
-  console.log('Reveal:',media);
-  // Read the exact bytes backing the mobile download link for independent decoding.
-  await driver.evaluate(()=>{
-    const url=document.querySelector('a[download]').href;
-    window.exportResult={};
-    fetch(url).then(r=>r.blob()).then(blob=>{
-      const reader=new FileReader();
-      reader.onload=()=>{window.exportResult={data:reader.result.split(',')[1]};};
-      reader.onerror=()=>{window.exportResult={error:'could not read download'};};
-      reader.readAsDataURL(blob);
-    }).catch(e=>{window.exportResult={error:e.message};});
-  });
-  const size = await until(()=>driver.evaluate(()=>{
-    if(window.exportResult?.error) throw Error(window.exportResult.error);
-    return window.exportResult?.data?.length || 0;
-  }),'export bytes');
-  const parts=[];
-  for(let i=0;i<size;i+=65536) parts.push(await driver.evaluate(start=>window.exportResult.data.slice(start,start+65536),i));
-  assert.match(media.filename,/^pass-the-movie-[\dTZ-]+\.(mp4|webm)$/);
-  const path=resolve(output,mode+'-'+media.filename);
-  await writeFile(path,Buffer.from(parts.join(''),'base64'));
-  console.log('Exported mobile video file:',path);
-  await driver.screenshot(resolve(output,platform+'-'+mode+'-reveal.png'));
-  }
+    else {
+      await driver.navigate();
+      await until(()=>driver.evaluate(()=>Object.keys(document.querySelector('main button')||{}).some(key=>key.startsWith('__reactProps$'))),'interactive recording page',100000);
+      await recordScenes(driver);
+    }
+    await driver.tap('Reveal the movie');
+    await until(()=>driver.evaluate(()=>{
+      const error=document.querySelector('[role="alert"]');
+      if(error) throw Error(error.innerText);
+      return !!document.querySelector('a[download][href^="blob:"]');
+    }),'rendered movie',65000);
+    const media = await driver.evaluate(()=>{
+      const link=document.querySelector('a[download]');
+      const video=document.querySelector('video[controls]');
+      return {filename:link.download, player:video?.getAttribute('src')===link.getAttribute('href'),
+        shareButton:[...document.querySelectorAll('button')].some(b=>b.textContent==='Share video')};
+    });
+    assert.ok(media.player);
+    console.log('Reveal:',media);
+    // Read the exact bytes backing the mobile download link for independent decoding.
+    await driver.evaluate(()=>{
+      const url=document.querySelector('a[download]').href;
+      window.exportResult={};
+      fetch(url).then(r=>r.blob()).then(blob=>{
+        const reader=new FileReader();
+        reader.onload=()=>{window.exportResult={data:reader.result.split(',')[1]};};
+        reader.onerror=()=>{window.exportResult={error:'could not read download'};};
+        reader.readAsDataURL(blob);
+      }).catch(e=>{window.exportResult={error:e.message};});
+    });
+    const size = await until(()=>driver.evaluate(()=>{
+      if(window.exportResult?.error) throw Error(window.exportResult.error);
+      return window.exportResult?.data?.length || 0;
+    }),'export bytes');
+    const parts=[];
+    for(let i=0;i<size;i+=65536) parts.push(await driver.evaluate(start=>window.exportResult.data.slice(start,start+65536),i));
+    assert.match(media.filename,/^pass-the-movie-[\dTZ-]+\.(mp4|webm)$/);
+    const path=resolve(output,mode+'-'+media.filename);
+    await writeFile(path,Buffer.from(parts.join(''),'base64'));
+    console.log('Exported mobile video file:',path);
+    try { await driver.screenshot(resolve(output,platform+'-'+mode+'-reveal.png')); } catch(e){ console.log('Reveal screenshot unavailable:',e.message); }
+    if(mode==='recorded' && media.shareButton && (platform==='android'||process.env.NATIVE_IOS==='1')){
+      await driver.tap('Share video');
+      await pause(1500);
+      if(platform==='android'){
+        const activity=execFileSync('adb',['shell','dumpsys','activity','activities'],{encoding:'utf8'});
+        console.log('Native Android chooser opened:', /mResumedActivity[^\n]*(Chooser|Resolver)|topResumedActivity[^\n]*(Chooser|Resolver)/i.test(activity));
+        await writeFile(resolve(output,'android-share.png'),execFileSync('adb',['exec-out','screencap','-p']));
+        execFileSync('adb',['shell','input','keyevent','4']);
+      }else{
+        const udid=process.env.SIMULATOR_UDID;
+        const tree=execFileSync('axe',['describe-ui','--udid',udid],{encoding:'utf8',timeout:30000});
+        console.log('Native iOS share sheet opened:', /AirDrop|Save Video|Save to Files|Copy iCloud Link/i.test(tree));
+        await writeFile(resolve(output,'ios-share-ui.json'),tree);
+        await driver.screenshot(resolve(output,'ios-share.png'));
+        // Return to the page without picking a recipient.
+        if(/AirDrop|Save Video|Save to Files|Copy iCloud Link/i.test(tree)){
+          try{execFileSync('axe',['tap','--label','Close','--udid',udid],{timeout:15000});}
+          catch{await driver.navigate();}
+        }
+      }
+    }
+    }
 } catch (error) {
   try {console.log('Page diagnostics:',await driver.evaluate(()=>({ready:document.readyState, scripts:[...document.scripts].map(s=>s.src||'inline'), firstButton:Object.keys(document.querySelector('button')||{}),page:location.href})));}catch{}
   try {console.log('Decoder states:',await driver.evaluate(()=>[...document.querySelectorAll('video')].map(v=>({width:v.videoWidth,height:v.videoHeight,t:v.currentTime,duration:String(v.duration),ready:v.readyState,paused:v.paused,ended:v.ended,error:v.error?.message}))));}catch{}
