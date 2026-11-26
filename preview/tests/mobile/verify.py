@@ -29,10 +29,15 @@ def verify(movie, recorded):
 take = Path("mobile-test-results/take-pass-the-movie.video")
 if take.exists():
     cmd = ["ffmpeg","-nostdin","-v","error","-i",str(take)]
-    def color_at(t):
-        return tuple(subprocess.check_output([*cmd,"-ss",t,"-frames:v","1","-vf","scale=1:1","-pix_fmt","rgb24","-f","rawvideo","-"]))
-    first, middle = color_at("0"), color_at("1.5")
-    assert len(first)==3 and first[2]>first[0] and middle[0]>2*middle[2], (first,middle)
+    frames=json.loads(subprocess.check_output(["ffprobe","-v","error","-select_streams","v:0","-show_frames","-show_entries","frame=best_effort_timestamp_time","-of","json",str(take)]))["frames"]
+    raw=subprocess.check_output([*cmd,"-an","-vf","scale=1:1","-fps_mode","passthrough","-pix_fmt","rgb24","-f","rawvideo","-"])
+    rgb=[tuple(raw[i:i+3]) for i in range(0,len(raw),3)]
+    times=[float(f["best_effort_timestamp_time"])-float(frames[0]["best_effort_timestamp_time"]) for f in frames]
+    assert len(times)==len(rgb) and 2.45<=times[-1]<3.5, (len(times),times[-1])
+    opening=[c for t,c in zip(times,rgb) if t<.55 and c[2]>c[0] and max(c)<100]
+    ending=[c for t,c in zip(times,rgb) if t>1.5 and c[0]>2*c[2]]
+    assert opening and ending, (rgb[:3],rgb[-3:])
+    first,middle=opening[0],ending[-1]
     samples=array.array("h",subprocess.check_output([*cmd,"-t","0.6","-map","0:a:0","-ar","8000","-ac","1","-f","s16le","-"]))
     assert samples and sum(v*v for v in samples)/len(samples)>100**2, "Opening audio is silent"
     spans = subprocess.check_output(["ffprobe","-v","error","-show_entries","stream=codec_type,start_time,duration","-of","compact",str(take)],text=True)

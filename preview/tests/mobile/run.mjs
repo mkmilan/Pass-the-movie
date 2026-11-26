@@ -119,7 +119,7 @@ async function recordScenes(driver, cameraOnly=false) {
       const ctx=canvas.getContext('2d');
       const color=['#ee4045','#1ec87a','#429dff','#efc340','#d65bda'][scene++ % 5];
       let frame=0;
-      const paint=()=>{ctx.fillStyle=(scene===1 && performance.now()<tap+600)?'#17213c':color;ctx.fillRect(0,0,360,640);ctx.fillStyle='white';ctx.fillRect(frame++ % 300,320,50,50);};
+      const paint=()=>{ctx.fillStyle=scene!==1?color:tap===Infinity?'#40e28d':performance.now()<tap+600?'#17213c':color;ctx.fillRect(0,0,360,640);ctx.fillStyle='white';ctx.fillRect(frame++ % 300,320,50,50);};
       paint();
       const interval=setInterval(paint,1000/30);
       const stream=canvas.captureStream(30);
