@@ -16,6 +16,19 @@ page.on('request',req=>{
 page.on('pageerror',e=>errors.push(e.message));
 const wait=async text=>page.getByText(text,{exact:true}).waitFor({timeout:45000});
 const button=name=>page.getByRole('button',{name,exact:true});
+async function checkWatermarkOption({ escape = false } = {}) {
+  const trigger = page.getByRole('button', {name: /Remove watermark/});
+  await trigger.click();
+  const dialog = page.getByRole('dialog', {name: 'Remove watermark'});
+  await dialog.waitFor();
+  await dialog.getByText('With watermark', {exact: true}).waitFor();
+  await dialog.getByText('Without watermark', {exact: true}).waitFor();
+  assert.ok(await dialog.getByRole('button', {name: 'Continue to payment'}).isDisabled());
+  if (escape) await page.keyboard.press('Escape');
+  else await dialog.getByRole('button', {name: 'Continue for free'}).click();
+  await dialog.waitFor({state: 'hidden'});
+  assert.ok(await trigger.evaluate(el => el === document.activeElement));
+}
 async function record(){
   await button('Record 3 seconds').click({timeout:15000});
   await wait('Review your scene or retake.');
@@ -112,9 +125,23 @@ try{
   await button('Make another movie').click();
   await button('Try with five sample scenes').click();
   await wait('The movie is complete.');
+  await checkWatermarkOption();
+  assert.equal(await page.locator('video').count(), 0);
+  assert.equal(await page.getByRole('link', {name: /Download/}).count(), 0);
+  await page.evaluate(() => {
+    Object.defineProperties(navigator, {
+      canShare: {configurable: true, value: ({files}) => files.length === 1},
+      share: {configurable: true, value: async ({files}) => { window.sharedMovie = files[0]; }},
+    });
+  });
   await button('Reveal the movie').click();
   await wait('Your movie is ready!');
+  await checkWatermarkOption({escape: true});
   assert.equal(downloads,1);
+  assert.equal(await page.evaluate(() => Boolean(window.sharedMovie)), false);
+  await button('Share video').click();
+  const filename = await page.getByRole('link', {name: /Download/}).getAttribute('download');
+  assert.equal(await page.evaluate(() => window.sharedMovie.name), filename);
   await verifyDownload();
   assert.equal(downloads,2);
   await button('Make another movie').click();

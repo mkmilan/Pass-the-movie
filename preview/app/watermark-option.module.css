@@ -1,0 +1,93 @@
+.option {
+  --ink: var(--color-ptm-ink, #24211e);
+  --accent: var(--color-ptm-accent, #b63222);
+  --line: var(--color-ptm-line, #d5c7b5);
+  --muted: var(--color-ptm-muted, #62564e);
+  --tile: var(--color-ptm-tile, #fae8d8);
+  color: var(--ink);
+}
+
+.offer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  padding: .75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: .9rem;
+  background: white;
+  text-align: left;
+  cursor: pointer;
+}
+.offer:hover { border-color: var(--accent); }
+.icon {
+  display: grid;
+  place-items: center;
+  width: 2.65rem;
+  height: 2.65rem;
+  flex: none;
+  border-radius: .65rem;
+  background: var(--tile);
+  color: var(--accent);
+}
+.copy { display: grid; }
+.copy strong { font-size: 1rem; line-height: 1.4; }
+.copy small, .note { color: var(--muted); font-size: .875rem; }
+.chevron { margin-left: auto; color: var(--accent); font-size: 1.6rem; line-height: 1; }
+
+.dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(24rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: clamp(1rem, 5vw, 1.5rem);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: white;
+  box-shadow: 0 1.2rem 4rem #16152c35;
+}
+.dialog::backdrop { background: rgb(18 23 43 / 58%); }
+.dialog h2 {
+  font: bold clamp(1.55rem, 6vw, 1.9rem)/1.15 Georgia, serif;
+  letter-spacing: -.03em;
+}
+.intro { margin: .5rem 0 1rem; font-size: 1rem; line-height: 1.45; }
+.samples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.sample { margin: 0; text-align: center; }
+.frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(100%, 6.5rem, 14dvh);
+  aspect-ratio: 9 / 16;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: .55rem;
+  background: radial-gradient(ellipse at 60% 30%, #ffe9a7, #dcaa53);
+  color: #493620;
+}
+.frame::after { content: ''; position: absolute; inset: .4rem; border: 1px solid #79532950; }
+.end { font: italic bold 2.5rem/1 Georgia, serif; letter-spacing: -.09em; }
+.mark {
+  position: absolute;
+  top: 12%;
+  padding: .12rem .28rem;
+  background: #322c26ba;
+  color: white;
+  font: bold .55rem/1.2 Arial, sans-serif;
+  letter-spacing: .025em;
+}
+.sample figcaption { margin-top: .4rem; font-size: .8125rem; font-weight: 600; }
+.note { margin: 1rem 0; line-height: 1.45; }
+.checkout, .dialog form button { width: 100%; min-height: 44px; }
+.checkout:disabled {
+  border-radius: .75rem;
+  background: var(--tile);
+  color: var(--muted);
+  font-weight: 700;
+  opacity: 1;
+}
+.dialog form { margin-top: .5rem; }

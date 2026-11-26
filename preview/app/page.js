@@ -2,6 +2,7 @@
 
 import {useEffect,useRef,useState} from 'react';
 import CameraCapture from './camera';
+import WatermarkOption from './watermark-option';
 import {lastFrame,renderMovie} from './demo-media';
 
 const samples=()=>Array.from({length:5},(_,i)=>({number:i+1,kind:'sample'}));
@@ -89,10 +90,11 @@ export default function Preview(){
       </>}
       {stage==='assemble'&&<>
         <h1 className="ptm-heading">The movie is complete.</h1>
-        <p>All five scenes are ready. Time to see the story you made together.</p>
+        <p>All five scenes are ready. Reveal your movie for free with the Pass the Movie watermark.</p>
         <section className="rounded-xl border border-ptm-line p-4 ptm-detail"><p>This test exports the movie using your browser, not our production FFmpeg worker. Target: 15 seconds, vertical 9:16 video. Keep the screen on.</p>
           {scenes.some(s=>s.kind==='clip')&&<label className="mt-3 flex items-center gap-2"><input type="checkbox" checked={sound} onChange={e=>setSound(e.target.checked)}/> Include recorded sound if supported</label>}
         </section>
+        <WatermarkOption/>
         <button className="ptm-primary" disabled={busy} onClick={assemble}>Reveal the movie</button>
       </>}
       {stage==='rendering'&&<>
@@ -106,6 +108,7 @@ export default function Preview(){
         <div className="rounded-xl bg-ptm-signal p-3 text-center ptm-detail font-black tracking-wide">FIVE SCENES. ONE MOVIE.</div>
         <h1 className="ptm-heading">Your movie is ready!</h1>
         <video src={movie.url} controls playsInline preload="metadata" className="mx-auto aspect-[9/16] w-full max-w-[280px] rounded-2xl bg-ptm-player object-contain"/>
+        <WatermarkOption/>
         <a className="ptm-primary" href={movie.url} download={movie.filename}>Download {movie.ext.toUpperCase()}</a>
         {movie.shareable&&<button className="ptm-secondary" onClick={share}>Share video</button>}
         <p className="ptm-caption text-ptm-muted">Browser export may use MP4 or WebM and may vary slightly in timing. The server version will normalize every movie to 15 seconds of H.264/AAC MP4.</p>

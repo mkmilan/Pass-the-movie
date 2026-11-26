@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import { fetchPrivateMedia } from './api';
+import WatermarkOption from '../../../../preview/app/watermark-option';
 
 export default function FinalReveal({movie,apiOrigin}){
   const [file,setFile]=useState(null),[url,setUrl]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(true),[shareable,setShareable]=useState(false),[reload,setReload]=useState(0);
   const id=movie.publicId,slot=movie.mySlot,expiresAt=movie.expiresAt;
+  const [revealedId, setRevealedId] = useState(null);
+  const revealed = revealedId === id;
   const filename='pass-the-movie-'+id+'.mp4';
   useEffect(()=>{
     const controller=new AbortController();let objectUrl,expired=false;
@@ -14,6 +17,7 @@ export default function FinalReveal({movie,apiOrigin}){
     const remaining=Date.parse(expiresAt)-Date.now();
     if(!Number.isFinite(remaining)||remaining<=0){expire();return;}
     const timer=setTimeout(expire,remaining);
+    if (!revealed) return () => clearTimeout(timer);
     (async()=>{
       try{
         const response=await fetchPrivateMedia(apiOrigin+'/movies/'+encodeURIComponent(id)+'/final?slot='+slot,{signal:controller.signal});
@@ -28,7 +32,7 @@ export default function FinalReveal({movie,apiOrigin}){
       finally{if(!controller.signal.aborted)setLoading(false);}
     })();
     return()=>{clearTimeout(timer);controller.abort();if(objectUrl)URL.revokeObjectURL(objectUrl);};
-  },[id,slot,expiresAt,apiOrigin,movie.final.bytes,filename,reload]);
+  },[id,slot,expiresAt,apiOrigin,movie.final.bytes,filename,reload,revealed]);
   function share(){
     if(!file||!shareable||Date.now()>=Date.parse(expiresAt))return;
     // Invoke directly inside the tap; the file is already prepared.
@@ -38,10 +42,16 @@ export default function FinalReveal({movie,apiOrigin}){
   return <section className="flex flex-col gap-4">
     <div className="rounded-xl bg-[#e6b84d] p-3 text-center font-black">FIVE SCENES. ONE MOVIE.</div>
     <p>Everyone who contributed can now watch the same 15-second film.</p>
-    {loading&&<p role="status">Loading your movie…</p>}
+    {!revealed && Date.now() < Date.parse(expiresAt) && <>
+      <p>Reveal your movie for free with the Pass the Movie watermark.</p>
+      <WatermarkOption/>
+      <button className="ptm-primary" onClick={() => setRevealedId(id)}>Reveal the movie</button>
+    </>}
+    {revealed&&loading&&<p role="status">Loading your movie…</p>}
     {url&&<video src={url} controls playsInline preload="metadata" className="mx-auto aspect-[9/16] w-full max-w-[300px] rounded-2xl bg-[#24211e] object-contain"/>}
     {error&&<p role="alert" className="text-sm">{error}</p>}
-    {!loading&&!url&&Date.now()<Date.parse(expiresAt)&&<button className="ptm-secondary" onClick={()=>setReload(n=>n+1)}>Retry movie loading</button>}
+    {revealed&&!loading&&!url&&Date.now()<Date.parse(expiresAt)&&<button className="ptm-secondary" onClick={()=>setReload(n=>n+1)}>Retry movie loading</button>}
+    {url&&<WatermarkOption/>}
     {url&&<a className="ptm-primary" href={url} download={filename}>Download MP4</a>}
     {shareable&&<button className="ptm-secondary" onClick={share}>Share video</button>}
     {url&&<p className="text-xs">Save the file to upload it manually to TikTok, Instagram or another app. No automatic posting.</p>}
