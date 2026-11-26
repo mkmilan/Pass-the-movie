@@ -136,9 +136,9 @@ async function recordScenes(driver, cameraOnly=false) {
   // Used only inside this test tab. Each tap opens a synthetic moving camera
   // and tone so the unmodified page still records and assembles actual clips.
   await driver.evaluate(() => {
-    let scene = 0, tap=Infinity;
+    let scene = 0, tap=Infinity, emitCue;
     document.addEventListener('click',e=>{
-      if(e.target.closest('button')?.textContent==='Record 3 seconds')tap=performance.now();
+      if(e.target.closest('button')?.textContent==='Record 3 seconds'){tap=performance.now();emitCue?.();}
     },true);
     const stop=MediaRecorder.prototype.stop;
     MediaRecorder.prototype.stop=function(...args){
@@ -155,12 +155,23 @@ async function recordScenes(driver, cameraOnly=false) {
       canvas.width=360; canvas.height=640;
       const ctx=canvas.getContext('2d');
       const color=['#ee4045','#1ec87a','#429dff','#efc340','#d65bda'][scene++ % 5];
-      let frame=0;
-      const paint=()=>{ctx.fillStyle=scene!==1?color:tap===Infinity?'#40e28d':performance.now()<tap+600?'#17213c':color;ctx.fillRect(0,0,360,640);ctx.fillStyle='white';ctx.fillRect(frame++ % 300,320,50,50);};
-      paint();
-      const interval=setInterval(paint,1000/30);
-      const stream=canvas.captureStream(30);
+      let frame=0,writing=false,writer;
+      // Model a camera with at most one frame in flight. A detached
+      // canvas.captureStream can itself deliver seconds-old frames on Android.
+      const generated=/Android/i.test(navigator.userAgent)&&window.MediaStreamTrackGenerator&&window.VideoFrame;
+      const stream=generated?new MediaStream([new MediaStreamTrackGenerator({kind:'video'})]):canvas.captureStream(30);
       const video=stream.getVideoTracks()[0],stop=video.stop.bind(video);
+      if(generated)writer=video.writable.getWriter();
+      const paint=()=>{
+        const now=performance.now();
+        ctx.fillStyle=scene!==1?color:tap===Infinity?'#40e28d':now<tap+600?'#17213c':color;
+        ctx.fillRect(0,0,360,640);ctx.fillStyle='white';ctx.fillRect(frame++ % 300,320,50,50);
+        if(writer&&!writing){
+          const sample=new VideoFrame(canvas,{timestamp:Math.round(now*1000)});
+          writing=true;writer.write(sample).catch(()=>{}).finally(()=>{sample.close();writing=false;});
+        }
+      };
+      emitCue=paint;paint();const interval=setInterval(paint,1000/30);
       let audio;
       if(constraints.audio){
         audio=new AudioContext();
@@ -174,7 +185,7 @@ async function recordScenes(driver, cameraOnly=false) {
         await audio.resume();
         stream.addTrack(dest.stream.getAudioTracks()[0]);
       }
-      video.stop=()=>{clearInterval(interval);stop();audio?.close().catch(()=>{});};
+      video.stop=()=>{emitCue=null;clearInterval(interval);writer?.close().catch(()=>{});stop();audio?.close().catch(()=>{});};
       return stream;
     }});
   });
