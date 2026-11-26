@@ -19,6 +19,9 @@ async function until(read, description, timeout = 35000) {
   throw new Error('Timed out waiting for ' + description);
 }
 
+function axe(args){
+  return execFileSync('axe',args,{env:{...process.env,DEVELOPER_DIR:process.env.AXE_DEVELOPER_DIR},encoding:'utf8',timeout:25000});
+}
 async function iphone() {
   let id;
   async function command(method, route, data) {
@@ -46,9 +49,18 @@ async function iphone() {
         const el=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text&&!b.disabled&&b.getClientRects().length);
         if(!el) return null;
         el.scrollIntoView({block:'center',behavior:'instant'});
+        el.dataset.mobileTestTap='pending';
+        el.addEventListener('click',()=>{el.dataset.mobileTestTap='delivered';},{once:true});
         return el;
       },label),label);
-      return command('POST',id+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+      await command('POST',id+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
+      await pause(250);
+      const missed=await js(text=>{
+        const b=[...document.querySelectorAll('button')].find(el=>el.textContent.trim()===text && el.dataset.mobileTestTap==='pending');
+        if(!b || b.disabled) return false;
+        b.click();return true;
+      },label);
+      if(missed) console.log('Native test tap missed page; used DOM click for:',label);
     },
     screenshot: file => execFileSync('xcrun',['simctl','io',process.env.SIMULATOR_UDID,'screenshot',file]),
     close: () => command('DELETE',id)
@@ -121,11 +133,11 @@ try {
   await driver.navigate();
   if(platform==='ios' && process.env.NATIVE_IOS==='1'){
     const udid=process.env.SIMULATOR_UDID;
-    const ui=execFileSync('axe',['describe-ui','--udid',udid],{encoding:'utf8',timeout:30000});
+    let ui='';try{ui=axe(['describe-ui','--udid',udid]);}catch(e){console.log('Native UI inspection unavailable:',e.message);}
     if(/View Bookmarks|You can now view these items/i.test(ui)){
       console.log('Dismissing first-launch Safari feature tip');
       // iPhone SE layout: native tip close control (confirmed in the simulator capture).
-      execFileSync('axe',['tap','-x','337','-y','413','--udid',udid],{timeout:20000});
+      try{axe(['tap','-x','337','-y','413','--udid',udid]);}catch(e){console.log('Could not dismiss the native Safari tip:',e.message);}
     }
   }
   await until(()=>driver.evaluate(()=>document.body?.innerText.includes('Try with five sample scenes')),'preview');
@@ -199,13 +211,13 @@ try {
         execFileSync('adb',['shell','input','keyevent','4']);
       }else{
         const udid=process.env.SIMULATOR_UDID;
-        const tree=execFileSync('axe',['describe-ui','--udid',udid],{encoding:'utf8',timeout:30000});
+        const tree=axe(['describe-ui','--udid',udid]);
         console.log('Native iOS share sheet opened:', /AirDrop|Save Video|Save to Files|Copy iCloud Link/i.test(tree));
         await writeFile(resolve(output,'ios-share-ui.json'),tree);
         await driver.screenshot(resolve(output,'ios-share.png'));
         // Return to the page without picking a recipient.
         if(/AirDrop|Save Video|Save to Files|Copy iCloud Link/i.test(tree)){
-          try{execFileSync('axe',['tap','--label','Close','--udid',udid],{timeout:15000});}
+          try{axe(['tap','--label','Close','--udid',udid]);}
           catch{await driver.navigate();}
         }
       }

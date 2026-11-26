@@ -18,7 +18,7 @@ jobs:
       - name: Boot an installed iPhone simulator
         run: |
           xcode=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
-          if [[ -n "$xcode" ]]; then sudo xcode-select --switch "$xcode/Contents/Developer"; fi
+          echo "AXE_DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
           xcodebuild -version
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
           udid=$(python3 - "$RUNNER_TEMP/devices.json" <<'PY'
@@ -33,7 +33,9 @@ jobs:
           )
           echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
           xcrun simctl boot "$udid"
-          open -a Simulator
+          sim="$(xcode-select -p)/Applications/Simulator.app"
+          /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$sim"
+          open -a "$sim"
           xcrun simctl bootstatus "$udid" -b
       - name: Run Safari on the iPhone simulator
         run: |
