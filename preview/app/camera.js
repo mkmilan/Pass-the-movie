@@ -28,14 +28,14 @@ function safeNative(w,h){return w>0&&h>0&&w<=1920&&h<=1920&&w*h<=2100000;}
 function crop(w,h){const r=W/H;return w/h>r?[(w-h*r)/2,0,h*r,h]:[0,(h-w/r)/2,w,w/r];}
 export default function CameraCapture({onTake,disabled=false,children}) {
   const video=useRef(null),alive=useRef(true),camera=useRef(null),capture=useRef(null),recorder=useRef(null),timer=useRef(null),raf=useRef(null),epoch=useRef(0),url=useRef(null),framingSize=useRef(null);
-  const orientationBlocked=useRef(false);
+  const orientationBlocked=useRef(false),makeStream=useRef(null);
   const [landscape,setLandscape]=useState(false);
   const [mode,setMode]=useState('idle'),[facing,setFacing]=useState('user'),[mic,setMic]=useState(true),[message,setMessage]=useState('Open your camera when ready.'),[review,setReview]=useState(null),[fit,setFit]=useState('cover');
   const busy=mode==='opening'||mode==='recording';
   function stopTracks(){
     cancelAnimationFrame(raf.current);raf.current=null;
     if(capture.current&&capture.current!==camera.current)capture.current.getVideoTracks().forEach(t=>t.stop());
-    capture.current=null;framingSize.current=null;
+    capture.current=null;framingSize.current=null;makeStream.current=null;
     camera.current?.getTracks().forEach(t=>t.stop());camera.current=null;
     if(video.current)video.current.srcObject=null;
   }
@@ -112,30 +112,39 @@ export default function CameraCapture({onTake,disabled=false,children}) {
   function prepareCapture(source,player,ticket){
     const w=player.videoWidth,h=player.videoHeight;
     framingSize.current=[w,h];
-    capture.current=source;
-    if(!needsResize(w,h)||typeof HTMLCanvasElement.prototype.captureStream!=='function')return;
-    const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
-    const ctx=canvas.getContext('2d',{alpha:false}),rect=crop(w,h);
-    const output=canvas.captureStream(30);
-    capture.current=output;
-    source.getAudioTracks().forEach(track=>output.addTrack(track));
-    let last=-Infinity;
-    function draw(now){
-      if(ticket!==epoch.current)return;
-      if(now-last>=1000/30-2){ctx.drawImage(player,...rect,0,0,W,H);last=now;}
-      raf.current=requestAnimationFrame(draw);
+    const android=/Android/i.test(navigator.userAgent);
+    if((!android&&!needsResize(w,h))||typeof HTMLCanvasElement.prototype.captureStream!=='function'){
+      makeStream.current=()=>source;return;
     }
-    draw(performance.now());
+    const canvas=document.createElement('canvas'),resize=needsResize(w,h);
+    canvas.width=resize?W:w;canvas.height=resize?H:h;
+    const ctx=canvas.getContext('2d',{alpha:false}),rect=crop(w,h);
+    if(!ctx)throw Error('Canvas unavailable');
+    // Keep the live preview warm. Its recording track must be new at the tap,
+    // otherwise mobile browsers can encode preview frames from before the take.
+    makeStream.current=()=>{
+      const output=canvas.captureStream(30);
+      capture.current=output;
+      source.getAudioTracks().forEach(track=>output.addTrack(track));
+      let last=-Infinity;
+      function draw(now){
+        if(ticket!==epoch.current)return;
+        if(now-last>=1000/30-2){ctx.drawImage(player,...rect,0,0,canvas.width,canvas.height);last=now;}
+        raf.current=requestAnimationFrame(draw);
+      }
+      draw(performance.now());return output;
+    };
   }
   function record(){
-    const stream=capture.current,v=video.current,ticket=epoch.current;
-    if(disabled||mode!=='preview'||recorder.current||!stream||!v?.videoWidth)return;
+    const source=camera.current,v=video.current,ticket=epoch.current;
+    if(disabled||mode!=='preview'||recorder.current||!makeStream.current||!v?.videoWidth)return;
     if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
-    if(mic&&!stream.getAudioTracks().some(track=>track.readyState==='live'&&track.enabled&&!track.muted)){
+    if(mic&&!source?.getAudioTracks().some(track=>track.readyState==='live'&&track.enabled&&!track.muted)){
       interrupt('No microphone input. Check your microphone, or switch Mic off.');return;
     }
-    const audio=stream.getAudioTracks().length>0;
     try{
+      const stream=makeStream.current();capture.current=stream;
+      const audio=stream.getAudioTracks().length>0;
       for(const mime of choices(audio)){
         if(mime&&!MediaRecorder.isTypeSupported(mime))continue;
         let r;
