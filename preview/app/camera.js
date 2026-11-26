@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import styles from './camera.module.css';
 
 const W=720,H=1280,MAX=12*1024*1024;
 const ROTATE_MESSAGE='Please rotate your phone to portrait mode.';
@@ -18,26 +19,26 @@ function portrait(w,h){return w>0&&h>0&&Math.abs(w/h-W/H)<0.02;}
 function needsResize(w,h){return !portrait(w,h)||w>W||h>H;}
 function safeNative(w,h){return w>0&&h>0&&w<=1920&&h<=1920&&w*h<=2100000;}
 function crop(w,h){const r=W/H;return w/h>r?[(w-h*r)/2,0,h*r,h]:[0,(h-w/r)/2,w,w/r];}
-export default function CameraCapture({onTake,disabled=false}) {
-  const video=useRef(null),alive=useRef(true),camera=useRef(null),capture=useRef(null),recorder=useRef(null),timer=useRef(null),raf=useRef(null),epoch=useRef(0),url=useRef(null),cancelled=useRef(false),recordingSize=useRef(null);
+export default function CameraCapture({onTake,disabled=false,children}) {
+  const video=useRef(null),alive=useRef(true),camera=useRef(null),capture=useRef(null),recorder=useRef(null),timer=useRef(null),raf=useRef(null),epoch=useRef(0),url=useRef(null),framingSize=useRef(null);
   const orientationBlocked=useRef(false);
   const [landscape,setLandscape]=useState(false);
-  const [mode,setMode]=useState('idle'),[facing,setFacing]=useState('user'),[mic,setMic]=useState(false),[message,setMessage]=useState('Open your camera when ready.'),[review,setReview]=useState(null),[count,setCount]=useState(0),[fit,setFit]=useState('cover');
-  const busy=mode==='opening'||mode==='countdown'||mode==='recording';
+  const [mode,setMode]=useState('idle'),[facing,setFacing]=useState('user'),[mic,setMic]=useState(true),[message,setMessage]=useState('Open your camera when ready.'),[review,setReview]=useState(null),[fit,setFit]=useState('cover');
+  const busy=mode==='opening'||mode==='starting'||mode==='recording';
   function stopTracks(){
     cancelAnimationFrame(raf.current);raf.current=null;
     if(capture.current&&capture.current!==camera.current)capture.current.getVideoTracks().forEach(t=>t.stop());
-    capture.current=null;recordingSize.current=null;
+    capture.current=null;framingSize.current=null;
     camera.current?.getTracks().forEach(t=>t.stop());camera.current=null;
     if(video.current)video.current.srcObject=null;
   }
   function releaseReview(){if(url.current)URL.revokeObjectURL(url.current);url.current=null;setReview(null);}
   function interrupt(reason){
-    cancelled.current=true;++epoch.current;clearTimeout(timer.current);
+    ++epoch.current;clearTimeout(timer.current);
     const r=recorder.current;recorder.current=null;
     if(r&&r.state!=='inactive'){r.onstop=null;try{r.stop();}catch{}}
     stopTracks();
-    if(alive.current){setCount(0);setMode('idle');setMessage(reason);}
+    if(alive.current){setMode('idle');setMessage(reason);}
   }
   useEffect(()=>{
     alive.current=true;
@@ -60,7 +61,7 @@ export default function CameraCapture({onTake,disabled=false}) {
     else query.addListener?.(syncOrientation);
     screenOrientation?.addEventListener?.('change',rotate);
     window.addEventListener('resize',syncOrientation);
-    const resize=()=>{const size=recordingSize.current,v=video.current;if(size&&v&&(v.videoWidth!==size[0]||v.videoHeight!==size[1]))interrupt('Camera orientation changed. Retake.');};
+    const resize=()=>{const size=framingSize.current,v=video.current;if(size&&v&&(v.videoWidth!==size[0]||v.videoHeight!==size[1]))interrupt('Camera orientation changed. Retake.');};
     const pageHide=()=>{if(camera.current||recorder.current)interrupt('Camera paused. Open it again.');};
     const player=video.current;
     player?.addEventListener('resize',resize);
@@ -78,10 +79,12 @@ export default function CameraCapture({onTake,disabled=false}) {
     const ticket=++epoch.current;stopTracks();releaseReview();onTake(null);setMode('opening');setMessage('Opening camera…');setFacing(nextFacing);setMic(nextMic);
     const constraints={video:{facingMode:{ideal:nextFacing},width:{ideal:W},height:{ideal:H},aspectRatio:{ideal:9/16},frameRate:{ideal:30,max:60},resizeMode:'crop-and-scale'},audio:nextMic};
     try{
-      let s;
-      try{s=await navigator.mediaDevices.getUserMedia(constraints);}catch(e){if(!nextMic)throw e;s=await navigator.mediaDevices.getUserMedia({...constraints,audio:false});if(alive.current)setMic(false);}
+      const s=await navigator.mediaDevices.getUserMedia(constraints);
       if(!alive.current||ticket!==epoch.current||document.hidden||landscapeNow()){s.getTracks().forEach(t=>t.stop());if(alive.current&&ticket===epoch.current&&landscapeNow())interrupt('Camera paused. Open it again.');return;}
       camera.current=s;s.getTracks().forEach(t=>t.addEventListener('ended',()=>{if(camera.current===s)interrupt('Camera or microphone disconnected.');},{once:true}));
+      if(nextMic&&!s.getAudioTracks().some(track=>track.readyState==='live'&&track.enabled)){
+        interrupt('No microphone input. Allow microphone access, or switch Mic off.');return;
+      }
       video.current.srcObject=s;await video.current.play();
       if(ticket!==epoch.current||!alive.current){s.getTracks().forEach(t=>t.stop());return;}
       if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
@@ -89,42 +92,43 @@ export default function CameraCapture({onTake,disabled=false}) {
       const needsCrop=needsResize(w,h);
       if((!safeNative(w,h)||!portrait(w,h))&&typeof HTMLCanvasElement.prototype.captureStream!=='function'){interrupt('This camera cannot record in portrait format. Try another browser.');return;}
       setFit(needsCrop&&typeof HTMLCanvasElement.prototype.captureStream!=='function'?'contain':'cover');
-      setMode('preview');setMessage(needsCrop&&typeof HTMLCanvasElement.prototype.captureStream!=='function'?'Native camera framing; the preview export fits it into portrait.':'Ready to record.');
-    }catch{if(alive.current&&ticket===epoch.current){stopTracks();setMode('idle');setMessage('Camera unavailable. Check permissions and retry.');}}
-  }
-  function start(){
-    if(disabled||mode!=='preview'||!camera.current)return;
-    if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
-    cancelled.current=false;setMode('countdown');setCount(3);
-    const ticket=epoch.current;
-    function tick(n){if(ticket!==epoch.current||!camera.current)return;if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}setCount(n);if(n>0)timer.current=setTimeout(()=>tick(n-1),1000);else record(ticket);}
-    timer.current=setTimeout(()=>tick(2),1000);
-  }
-  function record(ticket){
-    const s=camera.current,v=video.current;
-    if(!s||!v?.videoWidth||ticket!==epoch.current){interrupt('Camera not ready.');return;}
-    if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
-    setMode('recording');setMessage('Recording three seconds…');
-    const w=v.videoWidth,h=v.videoHeight;
-    recordingSize.current=[w,h];
-    let stream=s;
-    try{
-      if(needsResize(w,h)&&typeof HTMLCanvasElement.prototype.captureStream==='function'){
-        const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
-        const ctx=canvas.getContext('2d',{alpha:false});if(!ctx)throw Error();
-        const rect=crop(w,h);ctx.drawImage(v,...rect,0,0,W,H);stream=canvas.captureStream(30);
-        s.getAudioTracks().forEach(t=>stream.addTrack(t));
-        let last=0;const draw=now=>{
-          if(ticket!==epoch.current||cancelled.current)return;
-          if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
-          if(v.videoWidth!==w||v.videoHeight!==h){interrupt('Camera orientation changed. Retake.');return;}
-          if(now-last>=1000/30-2){ctx.drawImage(v,...rect,0,0,W,H);last=now;}
-          raf.current=requestAnimationFrame(draw);
-        };raf.current=requestAnimationFrame(draw);
+      prepareCapture(s,video.current,ticket);
+      setMode('preview');setMessage('Ready to record.');
+    }catch(error){
+      if(alive.current&&ticket===epoch.current){
+        interrupt(error.name==='NotAllowedError'||error.name==='NotFoundError'
+          ? (nextMic?'Allow access to your camera and microphone, or switch Mic off and retry.':'Allow camera access and retry.')
+          : 'Could not open the camera. Check the device and retry.');
       }
-      if(stream===s&&(!safeNative(w,h)||!portrait(w,h))){interrupt('This camera cannot record in portrait format. Try another browser.');return;}
-      capture.current=stream;
-      const audio=stream.getAudioTracks().length>0;
+    }
+  }
+  function prepareCapture(source,player,ticket){
+    const w=player.videoWidth,h=player.videoHeight;
+    framingSize.current=[w,h];
+    capture.current=source;
+    if(!needsResize(w,h)||typeof HTMLCanvasElement.prototype.captureStream!=='function')return;
+    const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
+    const ctx=canvas.getContext('2d',{alpha:false}),rect=crop(w,h);
+    const output=canvas.captureStream(30);
+    capture.current=output;
+    source.getAudioTracks().forEach(track=>output.addTrack(track));
+    let last=-Infinity;
+    function draw(now){
+      if(ticket!==epoch.current)return;
+      if(now-last>=1000/30-2){ctx.drawImage(player,...rect,0,0,W,H);last=now;}
+      raf.current=requestAnimationFrame(draw);
+    }
+    draw(performance.now());
+  }
+  function record(){
+    const stream=capture.current,v=video.current,ticket=epoch.current;
+    if(disabled||mode!=='preview'||recorder.current||!stream||!v?.videoWidth)return;
+    if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
+    if(mic&&!stream.getAudioTracks().some(track=>track.readyState==='live'&&track.enabled&&!track.muted)){
+      interrupt('No microphone input. Check your microphone, or switch Mic off.');return;
+    }
+    const audio=stream.getAudioTracks().length>0;
+    try{
       for(const mime of choices(audio)){
         if(mime&&!MediaRecorder.isTypeSupported(mime))continue;
         let r;
@@ -133,34 +137,52 @@ export default function CameraCapture({onTake,disabled=false}) {
           const chunks=[];let started=0,stopped=0;
           recorder.current=r;
           r.ondataavailable=e=>{if(e.data.size)chunks.push(e.data);};
-          r.onerror=()=>interrupt('Recording failed. Please retake.');
+          r.onerror=()=>{if(recorder.current===r)interrupt('Recording failed. Please retake.');};
           r.onstop=()=>{
-            if(recorder.current!==r||ticket!==epoch.current||cancelled.current||!alive.current)return;
+            if(recorder.current!==r||ticket!==epoch.current||!alive.current)return;
             if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
             recorder.current=null;clearTimeout(timer.current);stopTracks();
             const type=r.mimeType||chunks[0]?.type||'',blob=new Blob(chunks,{type});
             if(stopped-started<2700||stopped-started>3500||blob.size<=0||blob.size>MAX||!/^video\/(mp4|webm)(;|$)/i.test(type)){setMode('idle');setMessage('Recording timing or format was invalid. Please retake.');return;}
             url.current=URL.createObjectURL(blob);setReview(url.current);onTake(blob);setMode('review');setMessage('Review your scene or retake.');
           };
-          r.start();started=performance.now();timer.current=setTimeout(()=>{if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}if(r.state==='recording'){stopped=performance.now();r.stop();}},3000);return;
+          r.onstart=()=>{
+            if(ticket!==epoch.current||recorder.current!==r)return;
+            clearTimeout(timer.current);started=performance.now();
+            setMode('recording');setMessage('Recording three seconds…');
+            timer.current=setTimeout(()=>{
+              if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
+              if(r.state==='recording'){stopped=performance.now();r.stop();}
+            },3000);
+          };
+          r.start();
+          setMode('starting');setMessage('Starting recording…');
+          timer.current=setTimeout(()=>interrupt('Recording did not start. Please retry.'),4500);
+          return;
         }catch{if(r){r.onstop=null;r.onerror=null;r.ondataavailable=null;}recorder.current=null;}
       }
       throw Error();
     }catch{interrupt('Recording format unavailable. Try another browser.');}
   }
-  return <section className="flex flex-col gap-3">
-    <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] overflow-hidden rounded-2xl bg-ptm-player">
-      <video ref={video} autoPlay muted playsInline className="h-full w-full" style={{objectFit:fit,display:review?'none':'block'}} />
-      {review&&<video src={review} controls playsInline onError={()=>{if(url.current!==review)return;releaseReview();onTake(null);setMode('idle');setMessage('This recording could not be played. Please retake.');}} className="absolute inset-0 h-full w-full object-contain" />}
-      {count>0&&<span className="absolute inset-0 grid place-items-center text-6xl font-black text-white">{count}</span>}
-      {mode==='recording'&&<span className="absolute left-3 top-3 rounded-full bg-ptm-record px-3 py-1 ptm-detail font-bold text-white">REC · 3s</span>}
+  return <section className={styles.camera} aria-label="Scene camera">
+    <div className={styles.frame}>
+      <video ref={video} autoPlay muted playsInline aria-label="Live camera" style={{objectFit:fit,display:review?'none':'block'}} />
+      {review&&<video src={review} controls playsInline aria-label="Recorded scene" onError={()=>{if(url.current!==review)return;releaseReview();onTake(null);setMode('idle');setMessage('This recording could not be played. Please retake.');}} />}
+      {mode==='idle'&&<span className={styles.framing} aria-hidden="true"/>}
+      {mode==='recording'&&<span className={styles.recording}>● REC</span>}
     </div>
-    <div className="flex flex-wrap items-center gap-2">
-      <button className="ptm-secondary" disabled={disabled||landscape||busy||mode==='review'} onClick={()=>openCamera()}>{mode==='preview'?'Restart camera':'Open camera'}</button>
-      <button className="ptm-secondary" disabled={disabled||landscape||mode!=='preview'} onClick={()=>openCamera(facing==='user'?'environment':'user',mic)}>Flip</button>
-      <label className="flex min-h-11 items-center gap-2"><input type="checkbox" checked={mic} disabled={disabled||landscape||busy||mode==='review'} onChange={e=>{const value=e.target.checked;setMic(value);if(mode==='preview')openCamera(facing,value);}}/> Mic</label>
-    </div>
-    {mode==='review'?<button className="ptm-secondary" disabled={disabled||landscape} onClick={()=>openCamera()}>Retake</button>:<button className="ptm-primary" disabled={disabled||landscape||mode!=='preview'} onClick={start}>Record 3 seconds</button>}
-    <p role="status" className="ptm-detail">{landscape?ROTATE_MESSAGE:message}</p>
+    <p role="status" className={styles.status}>{landscape?ROTATE_MESSAGE:message}</p>
+    {mode==='review'?<div className={styles.actions}>
+      <button className="ptm-secondary" disabled={disabled||landscape} onClick={()=>openCamera()}>Retake</button>
+      {children}
+    </div>:<>
+      <div className={styles.tools}>
+        <label><input type="checkbox" aria-label="Mic" checked={mic} disabled={disabled||landscape||busy} onChange={e=>{const value=e.target.checked;setMic(value);if(mode==='preview')openCamera(facing,value);}}/>Mic {mic?'on':'off'}</label>
+        <button type="button" disabled={disabled||landscape||mode!=='preview'} onClick={()=>openCamera(facing==='user'?'environment':'user',mic)}>Flip camera</button>
+      </div>
+      {mode==='idle'||mode==='opening'
+        ? <button className="ptm-primary" disabled={disabled||landscape||busy} onClick={()=>openCamera()}>{mode==='opening'?'Opening camera…':'Open camera'}</button>
+        : <button className="ptm-primary" disabled={disabled||landscape||mode!=='preview'} onClick={record}>{mode==='recording'?'Recording…':mode==='starting'?'Starting…':'Record 3 seconds'}</button>}
+    </>}
   </section>;
 }

@@ -49,6 +49,7 @@ function linkFor(movie,kind,token){
 }
 export default function ScenePage(){
   const [movie,setMovie]=useState(null),[personal,setPersonal]=useState(''),[invite,setInvite]=useState(null),[join,setJoin]=useState(null),[consent,setConsent]=useState(initialConsent),[blob,setBlob]=useState(null),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState(''),[notice,setNotice]=useState(''),[progress,setProgress]=useState(null),[local,setLocal]=useState(false),[reference,setReference]=useState(null),[invalid,setInvalid]=useState(false),[removalRequested,setRemovalRequested]=useState(false),[beta,setBeta]=useState(false),[startKey,setStartKey]=useState('');
+  const [inCamera,setInCamera]=useState(false);
   const attempt=useRef(null),active=useRef(true);
   const path=movie?'/movies/'+encodeURIComponent(movie.publicId):null;
   const slot=movie?.mySlot,status=movie?.myScene.status;
@@ -121,15 +122,21 @@ export default function ScenePage(){
     const data=await post('/movies/'+encodeURIComponent(join.id)+'/claim',{adult:true,inviteToken:join.token});if(active.current)adopt(data);
   });}
   function onTake(take){setBlob(take);attempt.current=null;setError('');}
+  function applyUploadState(data){
+    if(!active.current)return;
+    setMovie(data);
+    if(['accepted','queued','uploading','retryable'].includes(data.myScene.status))setInCamera(false);
+    if(data.myScene.status==='retryable'){setBlob(null);attempt.current=null;}
+  }
   async function submit(){
     if(!movie||!blob||!Object.values(consent).every(Boolean)||busy||waiting||accepted||invalid)return;
     await action(async()=>{
       setProgress(0);if(!attempt.current)attempt.current=crypto.randomUUID();
       try{
         await (beta||process.env.NEXT_PUBLIC_PTM_DIRECT_UPLOADS==='true'?sendDirectClip:sendClip)(movie,blob,attempt.current,consent,p=>{if(active.current)setProgress(p);});
-        const data=await request(scoped(path,slot));if(active.current){setMovie(data);if(data.myScene.status==='retryable'){setBlob(null);attempt.current=null;}}
+        applyUploadState(await request(scoped(path,slot)));
       }catch(e){
-        try{const data=await request(scoped(path,slot));if(active.current){setMovie(data);if(data.myScene.status==='retryable'){setBlob(null);attempt.current=null;}}}catch{}
+        try{applyUploadState(await request(scoped(path,slot)));}catch{}
         throw e;
       }finally{if(active.current)setProgress(null);}
     });
@@ -155,6 +162,19 @@ export default function ScenePage(){
   });}
   const allConsent=Object.values(consent).every(Boolean);
   const title=removalRequested?'Movie removal requested':join?'Continue the movie':movie?.canViewFinal?'Your movie is ready!':accepted?'Scene saved!':movie?'Scene '+slot+' of 5':'Start a movie';
+  const canRecord=local&&!invalid&&!beta&&movie&&!movie.canViewFinal&&!accepted&&!waiting&&allConsent&&(slot===1||reference);
+  if(inCamera&&canRecord)return <main className="mx-auto flex min-h-dvh max-w-[440px] flex-col gap-2 px-4 py-3">
+    <header className="flex min-h-11 items-center justify-between gap-2">
+      <h1 className="text-2xl font-black">{title}</h1>
+      <button className="min-h-11 px-2 text-sm underline" disabled={busy} onClick={()=>{if(!blob||window.confirm('Discard this take and return to scene details?')){onTake(null);setInCamera(false);}}}>Scene details</button>
+    </header>
+    {reference&&<details className="text-sm"><summary className="min-h-11 py-3 font-bold">Previous frame</summary><img src={reference} alt="Last frame of the previous scene" className="mx-auto max-h-[25dvh] rounded-xl"/></details>}
+    <CameraCapture onTake={onTake} disabled={busy}>
+      <button className="ptm-primary" disabled={busy||!blob} onClick={submit}>Use this scene</button>
+    </CameraCapture>
+    {error&&<p role="alert" className="text-sm">Unable to continue: {error}</p>}
+    {progress!==null&&<div role="status">Uploading… {progress}%<progress className="w-full" max="100" value={progress}/></div>}
+  </main>;
   return <main className="mx-auto flex min-h-dvh max-w-[440px] flex-col gap-5 px-5 py-8">
     <header className="flex items-center justify-between"><a href="/" className="font-black">PASS THE MOVIE.</a><span className="text-xs font-bold">{beta?'PRIVATE STAGING':'LOCAL DEV'}</span></header>
     <h1 className="text-3xl font-black">{title}</h1>
@@ -187,9 +207,7 @@ export default function ScenePage(){
         {status==='retryable'&&<p role="alert">Scene rejected: {movie.myScene.errorCode}. Please retake.</p>}
         <p className="text-sm">Your clip is uploaded only when you submit. Accepted clips are immutable.</p>
         <div className="flex flex-col gap-2">{Object.entries(consentLabels).map(([key,label])=><label key={key} className="flex items-start gap-2 text-sm"><input className="mt-1" type="checkbox" checked={consent[key]} disabled={busy} onChange={e=>{if(!e.target.checked)onTake(null);setConsent({...consent,[key]:e.target.checked});}}/>{label}</label>)}</div>
-        {beta?<p role="status" className="rounded-xl border p-3 text-sm">Cloud recording is disabled until the hosting and media security checks pass.</p>:allConsent&&(slot===1||reference)?<CameraCapture onTake={onTake} disabled={busy}/>:<p className="text-sm">Confirm the recording rules and wait for the reference before opening your camera.</p>}
-        <button className="ptm-primary" disabled={beta||busy||!allConsent||!blob||(slot>1&&!reference)} onClick={submit}>Use this scene</button>
-        {progress!==null&&<div role="status">Uploading… {progress}%<progress className="w-full" max="100" value={progress}/></div>}
+        {beta?<p role="status" className="rounded-xl border p-3 text-sm">Cloud recording is disabled until the hosting and media security checks pass.</p>:canRecord?<button className="ptm-primary" disabled={busy} onClick={()=>setInCamera(true)}>Continue to camera</button>:<p className="text-sm">Confirm the recording rules and wait for the reference before opening your camera.</p>}
       </>}
       {movie.canDelete&&<button className="ptm-secondary border-[#b63222] text-[#b63222]" disabled={busy} onClick={deleteMovie}>Delete entire movie</button>}
       {movie.canAbandon&&movie.role!=='creator'&&<button className="ptm-secondary" disabled={busy} onClick={abandon}>Abandon unfinished turn</button>}

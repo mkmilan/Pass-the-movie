@@ -53,3 +53,32 @@ input[type="checkbox"], progress { accent-color: var(--color-ptm-accent); }
 .ptm-primary { background: var(--color-ptm-accent); color: white; border: 1px solid var(--color-ptm-accent); }
 .ptm-secondary { background: white; color: var(--color-ptm-ink); border: 1px solid #6F7893; }
 button:disabled { opacity: .55; cursor: not-allowed; }
+
+.preview-shell {
+  display: flex; flex-direction: column; gap: .8rem;
+  max-width: 460px; min-height: 100dvh; margin: 0 auto;
+  padding: max(.875rem, env(safe-area-inset-top)) 1rem max(.75rem, env(safe-area-inset-bottom));
+}
+.preview-shell[data-camera="true"], .preview-shell[data-stage="reveal"] { gap: .45rem; }
+.scene-progress { display: flex; gap: .35rem; margin: .25rem 0; }
+.scene-progress li { flex: 1; height: 5px; border-radius: 5px; background: var(--color-ptm-line); }
+.scene-progress li[data-saved="true"] { background: var(--color-ptm-accent); }
+.scene-progress li[aria-current] { background: var(--color-ptm-tile); border: 1px solid var(--color-ptm-accent); }
+.scene-title { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-height: 44px; }
+.scene-title h1 { font-size: clamp(1.5rem, 6vw, 1.8rem); }
+.frame-link { display: flex; align-items: center; gap: .4rem; min-height: 44px; font-size: .875rem; font-weight: bold; color: var(--color-ptm-accent); }
+.frame-link img { width: 20px; height: 36px; object-fit: cover; border-radius: 4px; }
+.reference { text-align: center; }
+.reference img, .finished-movie { margin: 0 auto; aspect-ratio: 9 / 16; border-radius: .75rem; background: var(--color-ptm-player); object-fit: contain; }
+.reference img { height: clamp(5rem, 24dvh, 13rem); width: auto; }
+.reference figcaption { margin-top: .3rem; font-size: .875rem; font-weight: bold; }
+.reference-dialog { position: fixed; inset: 0; margin: auto; padding: .75rem; border-radius: 1rem; max-height: 92dvh; overflow: auto; }
+.reference-dialog::backdrop { background: #12172b99; }
+.reference-dialog img { height: min(58dvh, 24rem); }
+.reference-dialog button { width: 100%; margin-top: .5rem; }
+.scene-options, .movie-actions { display: flex; align-items: center; gap: .5rem; }
+.scene-options { justify-content: space-between; }
+.scene-options button { min-height: 44px; padding: .25rem; font-size: .875rem; text-decoration: underline; color: var(--color-ptm-muted); }
+.scene-options button:only-child { margin: auto; }
+.finished-movie { width: min(100%, 18rem, max(5rem, calc((100dvh - 310px) * .5625))); }
+.movie-actions > * { flex: 1; }
