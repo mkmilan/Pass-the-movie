@@ -7,6 +7,7 @@ permissions:
   contents: read
 jobs:
   iphone:
+    if: "!contains(github.event.head_commit.message, '[android only]')"
     runs-on: macos-15
     timeout-minutes: 18
     steps:
@@ -46,6 +47,7 @@ jobs:
         if: always()
         with: {name: iphone-simulator, path: mobile-test-results, retention-days: 3}
   android:
+    if: "!contains(github.event.head_commit.message, '[ios only]')"
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -61,10 +63,20 @@ jobs:
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           image="system-images;android-35;google_apis_playstore;x86_64"
           "$sdkmanager" --install "platform-tools" "emulator" "$image"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/mobile-avds"
+          mkdir -p "$ANDROID_AVD_HOME"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd -n movie -k "$image" --device pixel_5
+          if [[ ! -f "$ANDROID_AVD_HOME/movie.ini" ]]; then
+            ini=$(find "$HOME" "$RUNNER_TEMP" -name movie.ini -type f -print -quit)
+            test -n "$ini"
+            export ANDROID_AVD_HOME=$(dirname "$ini")
+          fi
+          "$ANDROID_HOME/emulator/emulator" -list-avds | grep -x movie
           "$ANDROID_HOME/emulator/emulator" -avd movie -no-window -noaudio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
           trap 'tail -60 "$RUNNER_TEMP/emulator.log"' ERR
-          timeout 180 adb wait-for-device
+          emupid=$!
+          for n in {1..45}; do kill -0 "$emupid"; if adb devices | grep -q 'emulator-'; then break; fi; sleep 2; done
+          timeout 90 adb wait-for-device
           for n in {1..120}; do if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]]; then break; fi; sleep 2; done
           adb shell getprop ro.build.version.release
           adb shell input keyevent 82
