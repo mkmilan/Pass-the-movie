@@ -136,8 +136,7 @@ try {
     let ui='';try{ui=axe(['describe-ui','--udid',udid]);}catch(e){console.log('Native UI inspection unavailable:',e.message);}
     if(/View Bookmarks|You can now view these items/i.test(ui)){
       console.log('Dismissing first-launch Safari feature tip');
-      // iPhone SE layout: native tip close control (confirmed in the simulator capture).
-      try{axe(['tap','-x','337','-y','413','--udid',udid]);}catch(e){console.log('Could not dismiss the native Safari tip:',e.message);}
+      try{axe(['tap','--label','Close','--udid',udid]);}catch(e){console.log('Native close control was unavailable:',e.message);}
     }
   }
   await until(()=>driver.evaluate(()=>document.body?.innerText.includes('Try with five sample scenes')),'preview');

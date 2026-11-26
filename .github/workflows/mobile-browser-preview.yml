@@ -8,7 +8,7 @@ permissions:
 jobs:
   iphone:
     if: "!contains(github.event.head_commit.message, '[android only]')"
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +26,7 @@ jobs:
           items = json.load(open(sys.argv[1]))['devices']
           devices = [(tuple(map(int,k.split('.iOS-')[1].split('-'))), d['name'], d['udid'])
                      for k, ds in items.items() if '.iOS-' in k for d in ds if d['name'].startswith('iPhone')]
-          version, name, udid = max(devices)
+          version, name, udid = max(devices, key=lambda row: (row[0], row[1] == 'iPhone 17', row[1] == 'iPhone 16', row[1]))
           print('Using',name,version,file=sys.stderr)
           print(udid)
           PY
