@@ -35,7 +35,8 @@ if take.exists():
     assert len(first)==3 and first[2]>first[0] and middle[0]>2*middle[2], (first,middle)
     samples=array.array("h",subprocess.check_output([*cmd,"-t","0.6","-map","0:a:0","-ar","8000","-ac","1","-f","s16le","-"]))
     assert samples and sum(v*v for v in samples)/len(samples)>100**2, "Opening audio is silent"
-    print(f"Opening cue {first}, middle cue {middle}, audible mic in the opening 0.6s.",flush=True)
+    spans = subprocess.check_output(["ffprobe","-v","error","-show_entries","stream=codec_type,start_time,duration","-of","compact",str(take)],text=True)
+    print(f"Opening cue {first}, middle cue {middle}, audible mic in the opening 0.6s. Streams: {spans}",flush=True)
 else:
     for mode in ("sample","recorded"):
         movie, = Path("mobile-test-results").glob(mode+"-pass-the-movie-*")

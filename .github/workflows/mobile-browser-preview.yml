@@ -43,6 +43,7 @@ jobs:
         run: |
           brew install cameroncooke/axe/axe
           export NATIVE_IOS=1
+          xcrun simctl launch "$SIMULATOR_UDID" com.apple.mobilesafari
           sudo safaridriver --enable
           safaridriver -p 4444 > "$RUNNER_TEMP/safaridriver.log" 2>&1 &
           trap 'cat "$RUNNER_TEMP/safaridriver.log"' EXIT

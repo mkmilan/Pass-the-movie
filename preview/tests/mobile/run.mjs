@@ -35,9 +35,18 @@ async function iphone() {
     return value;
   }
   await until(() => fetch('http://127.0.0.1:4444/status').then(r=>r.ok).catch(()=>false), 'SafariDriver');
-  const session = await command('POST','/session',{capabilities:{alwaysMatch:{
+  const capabilities={alwaysMatch:{
     browserName:'Safari',platformName:'iOS','webkit:alwaysAllowAutoplay':true,'safari:useSimulator':true,'safari:deviceUDID':process.env.SIMULATOR_UDID
-  }}});
+  }};
+  let session;
+  for(let attempt=0;attempt<2;attempt++){
+    try{session=await command('POST','/session',{capabilities});break;}
+    catch(e){
+      if(attempt || !/timed out|session not created/i.test(e.message))throw e;
+      execFileSync('xcrun',['simctl','launch',process.env.SIMULATOR_UDID,'com.apple.mobilesafari']);
+      await pause(1200);
+    }
+  }
   id = '/session/' + session.sessionId;
   console.log('Safari capabilities:', session.capabilities);
   const js = (fn, ...args) => command('POST',id+'/execute/sync',{script:'return (' + fn + ')(...arguments)',args});
@@ -94,6 +103,11 @@ async function recordScenes(driver, cameraOnly=false) {
     document.addEventListener('click',e=>{
       if(e.target.closest('button')?.textContent==='Record 3 seconds')tap=performance.now();
     },true);
+    const stop=MediaRecorder.prototype.stop;
+    MediaRecorder.prototype.stop=function(...args){
+      window.stopDelay=performance.now()-tap;
+      return stop.apply(this,args);
+    };
     const start=MediaRecorder.prototype.start;
     MediaRecorder.prototype.start=function(...args){
       window.tapDelay=performance.now()-tap;
@@ -114,7 +128,12 @@ async function recordScenes(driver, cameraOnly=false) {
       if(constraints.audio){
         audio=new AudioContext();
         const dest=audio.createMediaStreamDestination(),tone=audio.createOscillator(),gain=audio.createGain();
-        tone.frequency.value=440;gain.gain.value=.2;tone.connect(gain).connect(dest);tone.start();
+        tone.frequency.value=440;gain.gain.value=0;
+        const activate=e=>{
+          if(e.target.closest('button')?.textContent!=='Record 3 seconds')return;
+          gain.gain.value=.2;document.removeEventListener('click',activate,true);
+        };
+        document.addEventListener('click',activate,true);tone.connect(gain).connect(dest);tone.start();
         await audio.resume();
         stream.addTrack(dest.stream.getAudioTracks()[0]);
       }
@@ -145,7 +164,9 @@ async function recordScenes(driver, cameraOnly=false) {
     assert.ok(latency>=0 && latency<200,'tap-to-recorder delay: '+latency);
     await checkFit();
     if(cameraOnly){
-      console.log('Tap-to-recorder delay:',latency,'ms');
+      const stop=await driver.evaluate(()=>window.stopDelay);
+      console.log('Tap to recorder start / stop:',latency,stop,'ms');
+      assert.ok(stop>=2900 && stop<3400,'three-second stop timer: '+stop);
       await driver.screenshot(resolve(output,platform+'-camera.png'));
       await driver.evaluate(()=>{
         fetch(document.querySelector('video[controls]').src).then(r=>r.blob()).then(blob=>{
