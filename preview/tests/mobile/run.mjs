@@ -96,7 +96,19 @@ async function android() {
   };
 }
 
+async function observeFrames(driver){
+  await driver.evaluate(()=>{
+    window.encodeStats={frames:0,first:null,last:null,supported:!!window.MediaStreamTrackGenerator};
+    if(!window.VideoFrame)return;
+    window.VideoFrame=new Proxy(window.VideoFrame,{construct(target,args){
+      const stats=window.encodeStats;
+      stats.frames++;stats.first??=performance.now();stats.last=performance.now();
+      return new target(...args);
+    }});
+  });
+}
 async function readTake(driver,name){
+  console.log('Frame delivery',name,await driver.evaluate(()=>window.encodeStats));
   await driver.evaluate(()=>{
     fetch(document.querySelector('video[controls]').src).then(r=>r.blob()).then(blob=>{
       const reader=new FileReader();
@@ -225,10 +237,12 @@ try {
   })));
   if(process.env.CAMERA_CHECK==='true'){
     if(platform==='android'){
+      await observeFrames(driver);
       try{await androidDeviceTake(driver);}catch(e){console.log('Android device input unavailable:',e.message);}
       await driver.navigate();
       await until(()=>driver.evaluate(()=>Object.keys(document.querySelector('main button')||{}).some(key=>key.startsWith('__reactProps$'))),'hydration');
     }
+    await observeFrames(driver);
     await recordScenes(driver,true);
   }
   else for(const mode of ['sample', 'recorded']){
