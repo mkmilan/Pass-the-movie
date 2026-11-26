@@ -1,7 +1,7 @@
 name: Free preview smoke checks
 on:
   pull_request:
-    branches: ["feat/beta-prep"]
+    branches: ["feat/beta-prep", "feat/free-preview"]
     paths:
       - "preview/**"
       - ".github/workflows/free-preview.yml"

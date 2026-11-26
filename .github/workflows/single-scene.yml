@@ -1,7 +1,7 @@
 name: Scene integration checks
 on:
   pull_request:
-    branches: ["main"]
+    branches: ["main", "feat/free-preview"]
     paths:
       - "apps/**"
       - "packages/**"
@@ -15,7 +15,7 @@ permissions:
   contents: read
 jobs:
   single-scene:
-    if: github.head_ref == 'feat/single-scene' || github.head_ref == 'feat/movie-chain' || github.head_ref == 'feat/movie-reveal' || github.head_ref == 'feat/hardening' || github.head_ref == 'feat/beta-prep'
+    if: github.head_ref == 'feat/single-scene' || github.head_ref == 'feat/movie-chain' || github.head_ref == 'feat/movie-reveal' || github.head_ref == 'feat/hardening' || github.head_ref == 'feat/beta-prep' || github.head_ref == 'feat/direct-r2-uploads'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -63,13 +63,13 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
       - name: Build candidate worker and run networkless synthetic smoke test
-        if: github.head_ref == 'feat/beta-prep'
+        if: github.head_ref == 'feat/beta-prep' || github.head_ref == 'feat/direct-r2-uploads'
         run: |
           docker build -f Dockerfile.worker -t ptm-worker-ci .
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 128 --memory 2g --cpus 1 --tmpfs /tmp:rw,noexec,nosuid,size=128m --entrypoint node ptm-worker-ci apps/worker/check.mjs
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 128 --memory 2g --cpus 1 --tmpfs /tmp:rw,noexec,nosuid,size=128m --entrypoint node ptm-worker-ci --test apps/worker/media.test.mjs
       - name: Preserve generated dependency lockfile for review
-        if: github.head_ref == 'feat/beta-prep'
+        if: github.head_ref == 'feat/beta-prep' || github.head_ref == 'feat/direct-r2-uploads'
         uses: actions/upload-artifact@v4
         with:
           name: candidate-package-lock

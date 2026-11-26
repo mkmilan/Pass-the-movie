@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSceneAccess, movieDto, SceneError } from './scene-access.mjs';
 import { createSceneUploader } from './scene-upload.mjs';
+import { createDirectUploader } from './direct-upload.mjs';
 import { createRateLimiter, RateError } from '../../packages/server/rate-limit.mjs';
 import { BudgetError } from '../../packages/server/budget.mjs';
 import { createReporter } from './reports.mjs';
@@ -12,10 +13,12 @@ export function createSceneRouter({config,collections,client,storage,now}) {
   const router=express.Router(),access=createSceneAccess({collections,client,config,now});
   const limiter=createRateLimiter({now});
   const source=req=>req.socket.remoteAddress||'unknown';
-  const uploader=createSceneUploader({collections,client,storage,now,onReserve(req,grant){
+  function onReserve(req,grant){
     limiter.check('upload-grant',grant.grantId,3,60000);
     limiter.check('upload-ip',source(req),30,60000);
-  }});
+  }
+  const uploader=createSceneUploader({collections,client,storage,now,onReserve});
+  const direct=createDirectUploader({collections,client,storage,now,onReserve});
   const report=createReporter({collections,client,now});
   router.use((req,res,next)=>{
     const origin=req.get('Origin');
@@ -50,8 +53,18 @@ export function createSceneRouter({config,collections,client,storage,now}) {
     if(!/^[1-5]$/.test(req.params.slot))return res.status(404).json({code:'NOT_FOUND'});
     const context=await access.authorize(req,{mutation:true,slotNumber:Number(req.params.slot)});
     if(config.mode==='beta'&&!config.mediaEnabled)throw new SceneError('BETA_MEDIA_DISABLED',503);
+    if(config.mode==='beta')throw new SceneError('DIRECT_UPLOAD_REQUIRED',409);
     res.status(202).json(await uploader.upload(req,context));
   });
+  for(const phase of ['start','complete']){
+    router.post('/movies/:id/scenes/:slot/upload/'+phase,json,async(req,res)=>{
+      if(!/^[1-5]$/.test(req.params.slot))return res.status(404).json({code:'NOT_FOUND'});
+      const context=await access.authorize(req,{mutation:true,slotNumber:Number(req.params.slot)});
+      if(config.mode==='beta'&&!config.mediaEnabled)throw new SceneError('BETA_MEDIA_DISABLED',503);
+      limiter.check('direct-'+phase,context.grant.grantId,12,60000);
+      res.status(202).json(await direct[phase](req,context));
+    });
+  }
   router.post('/movies/:id/invite',json,async(req,res)=>res.status(201).json(await access.issueInvite(await access.authorize(req,{mutation:true}))));
   router.post('/movies/:id/claim',json,async(req,res)=>res.json(await access.claim(req,res)));
   router.post('/movies/:id/replace-turn',json,async(req,res)=>res.json(await access.replace(req,await access.authorize(req,{mutation:true}))));

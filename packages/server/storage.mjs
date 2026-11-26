@@ -26,14 +26,37 @@ export function createStorage(config) {
       const head=await send(new HeadObjectCommand({Bucket:bucket,Key:key}));
       if(head.ContentLength!==f.size) throw new Error('STORAGE_SIZE_MISMATCH');
     },
-    async get(key,path) {
-      keyCheck(key);const object=await send(new GetObjectCommand({Bucket:bucket,Key:key}));
+    async get(key,path,{etag}={}) {
+      keyCheck(key);const object=await send(new GetObjectCommand({Bucket:bucket,Key:key,...(etag?{IfMatch:etag}:{})}));
       const size=object.ContentLength;
+      if(etag&&object.ETag!==etag){object.Body?.destroy();throw new Error('STORAGE_ETAG_MISMATCH');}
       if(!Number.isInteger(size)||size<=0||size>R.maxUploadBytes){object.Body?.destroy();throw new Error('STORAGE_SIZE_INVALID');}
       let bytes=0;
       const limiter=new Transform({transform(chunk,_enc,cb){bytes+=chunk.length;cb(bytes>size?new Error('STORAGE_SIZE_MISMATCH'):null,chunk);}});
       await pipeline(object.Body,limiter,createWriteStream(path,{flags:'wx',mode:0o600}),{signal:AbortSignal.timeout(20000)});
       if(bytes!==size)throw new Error('STORAGE_SIZE_MISMATCH');
+    },
+    async signWrite(key,{movieId,slot,bytes,type,expiresAt,now=new Date()}){
+      keyCheck(key);
+      const prefix='movies/'+movieId+'/raw/'+slot+'/';
+      if(typeof movieId!=='string'||!/^[a-f0-9-]{36}$/.test(movieId)||!Number.isInteger(slot)||slot<1||slot>5||
+        !key.startsWith(prefix)||!/^[a-f0-9-]{36}\.clip$/.test(key.slice(prefix.length))||
+        !Number.isInteger(bytes)||bytes<12||bytes>R.maxUploadBytes||!['video/mp4','video/webm'].includes(type))throw Error('SIGNED_WRITE_INVALID');
+      const lifetime=Math.min(90,Math.floor((new Date(expiresAt).getTime()-now.getTime())/1000));
+      if(!Number.isInteger(lifetime)||lifetime<1)throw Error('SIGNED_WRITE_EXPIRED');
+      const required=['content-length','content-type','if-none-match'];
+      const command=new PutObjectCommand({Bucket:bucket,Key:key,ContentLength:bytes,ContentType:type,IfNoneMatch:'*'});
+      const url=await getSignedUrl(client,command,{expiresIn:lifetime,signingDate:now,signableHeaders:new Set(required)});
+      const signed=new Set(new URL(url).searchParams.get('X-Amz-SignedHeaders')?.split(';'));
+      if(!required.every(h=>signed.has(h)))throw Error('SIGNED_WRITE_HEADERS_INVALID');
+      return {url,expiresAt:new Date(now.getTime()+lifetime*1000).toISOString(),headers:{'Content-Type':type,'If-None-Match':'*'}};
+    },
+    async inspectUpload(key){
+      keyCheck(key);
+      try{
+        const head=await send(new HeadObjectCommand({Bucket:bucket,Key:key}));
+        return {bytes:head.ContentLength,type:head.ContentType,etag:head.ETag};
+      }catch(e){if(e.$metadata?.httpStatusCode===404)return null;throw e;}
     },
     async signRead(key,{movieId,expiresAt,download=false,now=new Date()}){
       keyCheck(key);

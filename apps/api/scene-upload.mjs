@@ -49,7 +49,7 @@ export function createSceneUploader({collections:c,client,storage,now=()=>new Da
     const key=req.get('Idempotency-Key');
     if(typeof key!=='string'||!/^[A-Za-z0-9_-]{16,128}$/.test(key))fail('IDEMPOTENCY_KEY_REQUIRED',422);
     const hash=createHash('sha256').update(key).digest('hex'),n=grant.slotNumber,p=slotPath(n),s=movie.slots[n-1],t=now();
-    if(s.uploadIdempotencyHash===hash&&['uploading','queued','accepted','retryable'].includes(s.status))
+    if(!s.directUpload&&s.uploadIdempotencyHash===hash&&['uploading','queued','accepted','retryable'].includes(s.status))
       return {status:s.status,duplicate:true};
     if(movie.status!=='collecting'||movie.activeSlot!==n||!['claimed','retryable'].includes(s.status)||s.reservationUntil<=t)fail('TURN_UNAVAILABLE',409);
     if((s.uploadCount||0)>=3)fail('UPLOAD_LIMIT',429);
@@ -60,7 +60,7 @@ export function createSceneUploader({collections:c,client,storage,now=()=>new Da
     try{
       await session.withTransaction(async()=>{
         await reserveBudget(c,session,'upload',t);
-        const reserved=await c.movies.updateOne(scope,{$set:{[p+'status']:'uploading',[p+'uploadAttemptId']:attempt,[p+'uploadIdempotencyHash']:hash,[p+'uploadStartedAt']:t,[p+'rawKey']:rawKey,[p+'errorCode']:null},$inc:{revision:1,[p+'uploadCount']:1}},{session});
+        const reserved=await c.movies.updateOne(scope,{$set:{[p+'status']:'uploading',[p+'uploadAttemptId']:attempt,[p+'uploadIdempotencyHash']:hash,[p+'uploadStartedAt']:t,[p+'rawKey']:rawKey,[p+'rawETag']:null,[p+'directUpload']:null,[p+'errorCode']:null},$inc:{revision:1,[p+'uploadCount']:1}},{session});
         if(reserved.modifiedCount!==1)fail('TURN_CONFLICT',409);
       });
     }finally{await session.endSession();}

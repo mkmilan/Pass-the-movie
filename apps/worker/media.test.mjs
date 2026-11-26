@@ -26,10 +26,20 @@ test('normalizes mixed native formats and rejects invalid inputs', {timeout:1200
       assert.equal(summary.width,720); assert.equal(summary.height,1280);
       assert.equal(summary.audioCodec,'aac');
     }
+    const hd=join(dir,'hd.mp4'),fourK=join(dir,'4k.mp4'),hdOut=join(dir,'hd-out');
+    ff('-f','lavfi','-i','color=c=blue:s=1080x1920:r=30','-t','3','-c:v','libx264','-preset','ultrafast','-threads','2','-an',hd);
+    ff('-f','lavfi','-i','color=c=blue:s=2160x3840:r=30','-t','3','-c:v','libx264','-preset','ultrafast','-threads','2','-an',fourK);
+    await mkdir(hdOut);
+    const hdResult=await media.normalizeScene(hd,hdOut);
+    assert.equal(hdResult.summary.width,720);assert.equal(hdResult.summary.height,1280);
     const fail=join(dir,'fail');await mkdir(fail);
+    await assert.rejects(media.normalizeScene(fourK,fail),{code:'MEDIA_UNSUPPORTED'});
     await assert.rejects(media.normalizeScene(short,fail),{code:'MEDIA_DURATION'});
     await assert.rejects(media.normalizeScene(invalid,fail),{code:'MEDIA_INVALID'});
     await assert.rejects(media.normalizeScene(oversized,fail),{code:'MEDIA_TOO_LARGE'});
     await assert.rejects(createMediaProcessor({ffprobe:'/nonexistent/ffprobe'}).normalizeScene(portrait,fail),{code:'MEDIA_TOOLCHAIN_UNAVAILABLE'});
   } finally { await rm(dir,{recursive:true,force:true}); }
 });
+
+// Run optimization regressions in the existing media and container test jobs.
+import './media-optimization.test.mjs';
