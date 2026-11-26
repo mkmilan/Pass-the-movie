@@ -100,6 +100,11 @@ async function recordScenes(driver) {
     await driver.evaluate(()=>{const mic=document.querySelector('input[type=checkbox]');if(!mic.checked)mic.click();});
     await driver.tap('Open camera');
     await driver.tap('Record 3 seconds');
+    await until(()=>driver.evaluate(()=>document.querySelector('video[controls]')?.readyState>=2), 'review video');
+    console.log('Recorded take', scene, await driver.evaluate(()=>{
+      const v=document.querySelector('video[controls]');
+      return {duration:String(v.duration),width:v.videoWidth,height:v.videoHeight,ready:v.readyState};
+    }));
     await driver.tap('Use this scene');
     if(scene<5) await driver.tap("I'm the next player");
     console.log('Accepted recorded scene',scene);
@@ -159,6 +164,7 @@ try {
   await driver.screenshot(resolve(output,platform+'-'+mode+'-reveal.png'));
   }
 } catch (error) {
+  try {console.log('Decoder states:',await driver.evaluate(()=>[...document.querySelectorAll('video')].map(v=>({width:v.videoWidth,height:v.videoHeight,t:v.currentTime,duration:String(v.duration),ready:v.readyState,paused:v.paused,ended:v.ended,error:v.error?.message}))));}catch{}
   try {console.error('Last screen:', await driver.evaluate(()=>document.body.innerText));} catch {}
   try {await driver.screenshot(resolve(output,platform+'-failure.png'));} catch {}
   throw error;
