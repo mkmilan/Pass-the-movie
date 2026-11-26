@@ -42,7 +42,12 @@ async function iphone() {
     evaluate: js,
     navigate: () => command('POST',id+'/url',{url:origin}),
     tap: async label => {
-      const element = await until(()=>js(text=>[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text&&!b.disabled&&b.getClientRects().length)||null,label),label);
+      const element = await until(()=>js(text=>{
+        const el=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===text&&!b.disabled&&b.getClientRects().length);
+        if(!el) return null;
+        el.scrollIntoView({block:'center',behavior:'instant'});
+        return el;
+      },label),label);
       return command('POST',id+'/element/'+element['element-6066-11e4-a52e-4f735466cecf']+'/click',{});
     },
     screenshot: file => execFileSync('xcrun',['simctl','io',process.env.SIMULATOR_UDID,'screenshot',file]),
@@ -115,13 +120,25 @@ const driver = platform === 'ios' ? await iphone() : await android();
 try {
   await driver.navigate();
   await until(()=>driver.evaluate(()=>document.body?.innerText.includes('Try with five sample scenes')),'preview');
+  await until(()=>driver.evaluate(()=>{
+    const b=document.querySelector('main button');
+    return b && Object.keys(b).some(key=>key.startsWith('__reactProps$'));
+  }),'interactive preview hydration',100000);
   console.log('Browser:', await driver.evaluate(()=>navigator.userAgent));
   console.log('Media capabilities:', await driver.evaluate(()=>({
     recorder:typeof MediaRecorder, canvas:typeof HTMLCanvasElement.prototype.captureStream,
     share:typeof navigator.share, canShare:typeof navigator.canShare, width:innerWidth, height:innerHeight
   })));
   for(const mode of ['sample', 'recorded']){
-  if(mode==='sample') await driver.tap('Try with five sample scenes');
+  if(mode==='sample'){
+    const sampleLabel='Try with five sample scenes';
+    await driver.tap(sampleLabel);
+    await pause(1000);
+    if(platform==='ios' && await driver.evaluate(text=>[...document.querySelectorAll('button')].some(b=>b.textContent===text),sampleLabel)){
+      console.log('Retrying sample selection through the hydrated button handler.');
+      await driver.evaluate(text=>[...document.querySelectorAll('button')].find(b=>b.textContent===text).click(),sampleLabel);
+    }
+  }
   else {
     await driver.tap('Make another movie');
     await recordScenes(driver);
@@ -164,6 +181,7 @@ try {
   await driver.screenshot(resolve(output,platform+'-'+mode+'-reveal.png'));
   }
 } catch (error) {
+  try {console.log('Page diagnostics:',await driver.evaluate(()=>({ready:document.readyState, scripts:[...document.scripts].map(s=>s.src||'inline'), firstButton:Object.keys(document.querySelector('button')||{}),page:location.href})));}catch{}
   try {console.log('Decoder states:',await driver.evaluate(()=>[...document.querySelectorAll('video')].map(v=>({width:v.videoWidth,height:v.videoHeight,t:v.currentTime,duration:String(v.duration),ready:v.readyState,paused:v.paused,ended:v.ended,error:v.error?.message}))));}catch{}
   try {console.error('Last screen:', await driver.evaluate(()=>document.body.innerText));} catch {}
   try {await driver.screenshot(resolve(output,platform+'-failure.png'));} catch {}
