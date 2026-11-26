@@ -64,6 +64,48 @@ async function android() {
   };
 }
 
+async function recordScenes(driver) {
+  // Used only inside this test tab. Each tap opens a synthetic moving camera
+  // and tone so the unmodified page still records and assembles actual clips.
+  await driver.evaluate(() => {
+    let scene = 0;
+    Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {configurable:true, value:async constraints=>{
+      const canvas = document.createElement('canvas');
+      canvas.width=360; canvas.height=640;
+      const ctx=canvas.getContext('2d');
+      const color=['#ee4045','#1ec87a','#429dff','#efc340','#d65bda'][scene++ % 5];
+      let frame=0;
+      const paint=()=>{ctx.fillStyle=color;ctx.fillRect(0,0,360,640);ctx.fillStyle='white';ctx.fillRect(frame++ % 300,320,50,50);};
+      paint();
+      const interval=setInterval(paint,1000/30);
+      const stream=canvas.captureStream(30);
+      const video=stream.getVideoTracks()[0],stop=video.stop.bind(video);
+      let audio;
+      if(constraints.audio){
+        audio=new AudioContext();
+        const dest=audio.createMediaStreamDestination(),tone=audio.createOscillator(),gain=audio.createGain();
+        tone.frequency.value=440;gain.gain.value=.2;tone.connect(gain).connect(dest);tone.start();
+        await audio.resume();
+        stream.addTrack(dest.stream.getAudioTracks()[0]);
+      }
+      video.stop=()=>{clearInterval(interval);stop();audio?.close().catch(()=>{});};
+      return stream;
+    }});
+  });
+  await driver.tap('Start a movie');
+  for(let scene=1;scene<=5;scene++) {
+    await until(()=>driver.evaluate(()=>!!document.querySelector('input[type=checkbox]')),'recording consent');
+    await driver.evaluate(()=>document.querySelector('input[type=checkbox]').click());
+    await driver.tap('Continue to camera');
+    await driver.evaluate(()=>{const mic=document.querySelector('input[type=checkbox]');if(!mic.checked)mic.click();});
+    await driver.tap('Open camera');
+    await driver.tap('Record 3 seconds');
+    await driver.tap('Use this scene');
+    if(scene<5) await driver.tap("I'm the next player");
+    console.log('Accepted recorded scene',scene);
+  }
+}
+
 const driver = platform === 'ios' ? await iphone() : await android();
 try {
   await driver.navigate();
@@ -73,7 +115,12 @@ try {
     recorder:typeof MediaRecorder, canvas:typeof HTMLCanvasElement.prototype.captureStream,
     share:typeof navigator.share, canShare:typeof navigator.canShare, width:innerWidth, height:innerHeight
   })));
-  await driver.tap('Try with five sample scenes');
+  for(const mode of ['sample', 'recorded']){
+  if(mode==='sample') await driver.tap('Try with five sample scenes');
+  else {
+    await driver.tap('Make another movie');
+    await recordScenes(driver);
+  }
   await driver.tap('Reveal the movie');
   await until(()=>driver.evaluate(()=>{
     const error=document.querySelector('[role="alert"]');
@@ -106,10 +153,11 @@ try {
   const parts=[];
   for(let i=0;i<size;i+=65536) parts.push(await driver.evaluate(start=>window.exportResult.data.slice(start,start+65536),i));
   assert.match(media.filename,/^pass-the-movie-[\dTZ-]+\.(mp4|webm)$/);
-  const path=resolve(output,media.filename);
+  const path=resolve(output,mode+'-'+media.filename);
   await writeFile(path,Buffer.from(parts.join(''),'base64'));
   console.log('Exported mobile video file:',path);
-  await driver.screenshot(resolve(output,platform+'-reveal.png'));
+  await driver.screenshot(resolve(output,platform+'-'+mode+'-reveal.png'));
+  }
 } catch (error) {
   try {console.error('Last screen:', await driver.evaluate(()=>document.body.innerText));} catch {}
   try {await driver.screenshot(resolve(output,platform+'-failure.png'));} catch {}
