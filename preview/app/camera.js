@@ -24,7 +24,7 @@ export default function CameraCapture({onTake,disabled=false,children}) {
   const orientationBlocked=useRef(false);
   const [landscape,setLandscape]=useState(false);
   const [mode,setMode]=useState('idle'),[facing,setFacing]=useState('user'),[mic,setMic]=useState(true),[message,setMessage]=useState('Open your camera when ready.'),[review,setReview]=useState(null),[fit,setFit]=useState('cover');
-  const busy=mode==='opening'||mode==='starting'||mode==='recording';
+  const busy=mode==='opening'||mode==='recording';
   function stopTracks(){
     cancelAnimationFrame(raf.current);raf.current=null;
     if(capture.current&&capture.current!==camera.current)capture.current.getVideoTracks().forEach(t=>t.stop());
@@ -146,18 +146,17 @@ export default function CameraCapture({onTake,disabled=false,children}) {
             if(stopped-started<2700||stopped-started>3500||blob.size<=0||blob.size>MAX||!/^video\/(mp4|webm)(;|$)/i.test(type)){setMode('idle');setMessage('Recording timing or format was invalid. Please retake.');return;}
             url.current=URL.createObjectURL(blob);setReview(url.current);onTake(blob);setMode('review');setMessage('Review your scene or retake.');
           };
-          r.onstart=()=>{
-            if(ticket!==epoch.current||recorder.current!==r)return;
-            clearTimeout(timer.current);started=performance.now();
-            setMode('recording');setMessage('Recording three seconds…');
-            timer.current=setTimeout(()=>{
-              if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
-              if(r.state==='recording'){stopped=performance.now();r.stop();}
-            },3000);
-          };
+          // Encoders can emit the start event well after capturing the opening frames.
+          // Time the take from the successful start call in the user's tap handler.
           r.start();
-          setMode('starting');setMessage('Starting recording…');
-          timer.current=setTimeout(()=>interrupt('Recording did not start. Please retry.'),4500);
+          started=performance.now();
+          setMode('recording');setMessage('Recording three seconds…');
+          timer.current=setTimeout(()=>{
+            if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
+            if(r.state!=='recording'){interrupt('Recording stopped early. Please retake.');return;}
+            stopped=performance.now();r.stop();
+            timer.current=setTimeout(()=>interrupt('Could not finish recording. Please retake.'),6000);
+          },3000);
           return;
         }catch{if(r){r.onstop=null;r.onerror=null;r.ondataavailable=null;}recorder.current=null;}
       }
@@ -182,7 +181,7 @@ export default function CameraCapture({onTake,disabled=false,children}) {
       </div>
       {mode==='idle'||mode==='opening'
         ? <button className="ptm-primary" disabled={disabled||landscape||busy} onClick={()=>openCamera()}>{mode==='opening'?'Opening camera…':'Open camera'}</button>
-        : <button className="ptm-primary" disabled={disabled||landscape||mode!=='preview'} onClick={record}>{mode==='recording'?'Recording…':mode==='starting'?'Starting…':'Record 3 seconds'}</button>}
+        : <button className="ptm-primary" disabled={disabled||landscape||mode!=='preview'} onClick={record}>{mode==='recording'?'Recording…':'Record 3 seconds'}</button>}
     </>}
   </section>;
 }

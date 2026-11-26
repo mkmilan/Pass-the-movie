@@ -45,6 +45,8 @@ async function record(){
   await page.locator('video[controls]').waitFor();
   const delay=await page.evaluate(()=>window.recorderDelay);
   assert.ok(delay>=0&&delay<150,'recorder start after tap: '+delay+' ms');
+  const length=await page.evaluate(()=>window.takeLength);
+  assert.ok(length>=2900&&length<3350,'recording must stop three seconds after tapping: '+length+' ms');
 }
 async function verifyDownload({audio=false}={}){
   const [download]=await Promise.all([page.waitForEvent('download'),page.getByRole('link',{name:/Download (MP4|WEBM)/}).click()]);
@@ -76,6 +78,11 @@ try{
     document.addEventListener('click',e=>{
       if(e.target.closest('button')?.textContent==='Record 3 seconds')window.recordTap=performance.now();
     },true);
+    const stop=MediaRecorder.prototype.stop;
+    MediaRecorder.prototype.stop=function(...args){
+      window.takeLength=performance.now()-window.recordTap;
+      return stop.apply(this,args);
+    };
     const start=MediaRecorder.prototype.start;
     MediaRecorder.prototype.start=function(...args){
       window.recorderDelay=performance.now()-window.recordTap;
