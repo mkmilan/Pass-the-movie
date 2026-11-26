@@ -203,6 +203,7 @@ try{
   const high=await context.newPage();
   high.on('pageerror',e=>errors.push(e.message));
   await high.addInitScript(()=>{
+    Object.defineProperty(navigator,'userAgent',{configurable:true,value:navigator.userAgent+' Android'});
     let tapAt=Infinity;
     document.addEventListener('click',e=>{
       if(e.target.closest('button')?.textContent==='Record 3 seconds')tapAt=performance.now();

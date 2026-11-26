@@ -14,29 +14,22 @@ function landscapeNow(){
   if(type)return type.startsWith('landscape');
   return Math.abs(Number(window.orientation))===90;
 }
-function choices(audio){
-  const avc=audio?'video/mp4;codecs=avc1.42E01E,mp4a.40.2':'video/mp4;codecs=avc1.42E01E';
-  const vp8=audio?'video/webm;codecs=vp8,opus':'video/webm;codecs=vp8';
-  const vp9=audio?'video/webm;codecs=vp9,opus':'video/webm;codecs=vp9';
-  // Some Android AVC encoders deliver buffered frames long after the tap.
-  const preferred=/Android/i.test(navigator.userAgent)?[vp8,avc]:[avc,vp8];
-  return [...preferred,vp9,'video/mp4','video/webm',''];
-}
+function choices(audio){return audio?['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/mp4','video/webm','']:['video/mp4;codecs=avc1.42E01E','video/webm;codecs=vp8','video/webm;codecs=vp9','video/mp4','video/webm',''];}
 function portrait(w,h){return w>0&&h>0&&Math.abs(w/h-W/H)<0.02;}
 function needsResize(w,h){return !portrait(w,h)||w>W||h>H;}
 function safeNative(w,h){return w>0&&h>0&&w<=1920&&h<=1920&&w*h<=2100000;}
 function crop(w,h){const r=W/H;return w/h>r?[(w-h*r)/2,0,h*r,h]:[0,(h-w/r)/2,w,w/r];}
 export default function CameraCapture({onTake,disabled=false,children}) {
   const video=useRef(null),alive=useRef(true),camera=useRef(null),capture=useRef(null),recorder=useRef(null),timer=useRef(null),raf=useRef(null),epoch=useRef(0),url=useRef(null),framingSize=useRef(null);
-  const orientationBlocked=useRef(false),makeStream=useRef(null),frameWriter=useRef(null);
+  const orientationBlocked=useRef(false),androidTake=useRef(null);
   const [landscape,setLandscape]=useState(false);
   const [mode,setMode]=useState('idle'),[facing,setFacing]=useState('user'),[mic,setMic]=useState(true),[message,setMessage]=useState('Open your camera when ready.'),[review,setReview]=useState(null),[fit,setFit]=useState('cover');
-  const busy=mode==='opening'||mode==='recording';
+  const busy=mode==='opening'||mode==='recording'||mode==='finishing';
   function stopTracks(){
+    androidTake.current?.cancel();androidTake.current=null;
     cancelAnimationFrame(raf.current);raf.current=null;
-    frameWriter.current?.close().catch(()=>{});frameWriter.current=null;
     if(capture.current&&capture.current!==camera.current)capture.current.getVideoTracks().forEach(t=>t.stop());
-    capture.current=null;framingSize.current=null;makeStream.current=null;
+    capture.current=null;framingSize.current=null;
     camera.current?.getTracks().forEach(t=>t.stop());camera.current=null;
     if(video.current)video.current.srcObject=null;
   }
@@ -100,7 +93,15 @@ export default function CameraCapture({onTake,disabled=false,children}) {
       const needsCrop=needsResize(w,h);
       if((!safeNative(w,h)||!portrait(w,h))&&typeof HTMLCanvasElement.prototype.captureStream!=='function'){interrupt('This camera cannot record in portrait format. Try another browser.');return;}
       setFit(needsCrop&&typeof HTMLCanvasElement.prototype.captureStream!=='function'?'contain':'cover');
-      prepareCapture(s,video.current,ticket);
+      if(/Android/i.test(navigator.userAgent)&&window.VideoEncoder&&window.VideoFrame){
+        const {prepareAndroidTake}=await import('./android-take');
+        if(ticket!==epoch.current)return;
+        const prepared=await prepareAndroidTake(video.current,s.getAudioTracks()[0],needsCrop?W:w,needsCrop?H:h,crop(w,h));
+        if(ticket!==epoch.current){prepared?.cancel();return;}
+        androidTake.current=prepared;
+      }
+      if(androidTake.current)framingSize.current=[w,h];
+      else prepareCapture(s,video.current,ticket);
       setMode('preview');setMessage('Ready to record.');
     }catch(error){
       if(alive.current&&ticket===epoch.current){
@@ -113,58 +114,48 @@ export default function CameraCapture({onTake,disabled=false,children}) {
   function prepareCapture(source,player,ticket){
     const w=player.videoWidth,h=player.videoHeight;
     framingSize.current=[w,h];
-    const android=/Android/i.test(navigator.userAgent);
-    if((!android&&!needsResize(w,h))||typeof HTMLCanvasElement.prototype.captureStream!=='function'){
-      makeStream.current=()=>source;return;
-    }
-    const canvas=document.createElement('canvas'),resize=needsResize(w,h);
-    canvas.width=resize?W:w;canvas.height=resize?H:h;
+    capture.current=source;
+    if(!needsResize(w,h)||typeof HTMLCanvasElement.prototype.captureStream!=='function')return;
+    const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
     const ctx=canvas.getContext('2d',{alpha:false}),rect=crop(w,h);
-    if(!ctx)throw Error('Canvas unavailable');
-    // Keep the live preview warm. Its recording track must be new at the tap,
-    // otherwise mobile browsers can encode preview frames from before the take.
-    makeStream.current=()=>{
-      let output,writer;
-      if(android&&window.MediaStreamTrackGenerator&&window.VideoFrame){
-        try{
-          const track=new MediaStreamTrackGenerator({kind:'video'});
-          writer=track.writable.getWriter();frameWriter.current=writer;
-          output=new MediaStream([track]);
-        }catch{writer=null;}
-      }
-      output??=canvas.captureStream(30);
-      capture.current=output;
-      source.getAudioTracks().forEach(track=>output.addTrack(track));
-      let last=-Infinity,pending=false;
-      function draw(now){
-        if(ticket!==epoch.current)return;
-        if(!pending&&now-last>=1000/30-2){
-          ctx.drawImage(player,...rect,0,0,canvas.width,canvas.height);last=now;
-          if(writer){
-            // Supply a fresh frame and clock explicitly. Detached canvas capture
-            // can stop producing pictures while the Android microphone keeps going.
-            const frame=new VideoFrame(canvas,{timestamp:Math.round(now*1000)});
-            pending=true;
-            writer.write(frame).catch(()=>{
-              if(ticket===epoch.current&&frameWriter.current===writer)interrupt('Camera frames stopped. Please retake.');
-            }).finally(()=>{frame.close();pending=false;});
-          }
-        }
-        raf.current=requestAnimationFrame(draw);
-      }
-      draw(performance.now());return output;
-    };
+    const output=canvas.captureStream(30);
+    capture.current=output;
+    source.getAudioTracks().forEach(track=>output.addTrack(track));
+    let last=-Infinity;
+    function draw(now){
+      if(ticket!==epoch.current)return;
+      if(now-last>=1000/30-2){ctx.drawImage(player,...rect,0,0,W,H);last=now;}
+      raf.current=requestAnimationFrame(draw);
+    }
+    draw(performance.now());
+  }
+  function reviewBlob(blob){
+    if(!blob.size||blob.size>MAX){setMode('idle');setMessage('Recording size was invalid. Please retake.');return;}
+    url.current=URL.createObjectURL(blob);setReview(url.current);onTake(blob);setMode('review');setMessage('Review your scene or retake.');
   }
   function record(){
-    const source=camera.current,v=video.current,ticket=epoch.current;
-    if(disabled||mode!=='preview'||recorder.current||!makeStream.current||!v?.videoWidth)return;
+    const stream=capture.current,v=video.current,ticket=epoch.current;
+    if(disabled||mode!=='preview'||recorder.current||(!stream&&!androidTake.current)||!v?.videoWidth)return;
     if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
-    if(mic&&!source?.getAudioTracks().some(track=>track.readyState==='live'&&track.enabled&&!track.muted)){
+    if(mic&&!camera.current?.getAudioTracks().some(track=>track.readyState==='live'&&track.enabled&&!track.muted)){
       interrupt('No microphone input. Check your microphone, or switch Mic off.');return;
     }
+    if(androidTake.current){
+      const session=androidTake.current;
+      setMode('recording');setMessage('Recording three seconds…');
+      session.record(()=>{
+        if(ticket!==epoch.current)return;
+        setMode('finishing');setMessage('Saving your scene…');
+        framingSize.current=null;
+        camera.current?.getTracks().forEach(track=>track.stop());
+      }).then(blob=>{
+        if(ticket!==epoch.current||!alive.current)return;
+        androidTake.current=null;stopTracks();reviewBlob(blob);
+      }).catch(()=>{if(ticket===epoch.current)interrupt('Could not save the recording. Please retake.');});
+      return;
+    }
+    const audio=stream.getAudioTracks().length>0;
     try{
-      const stream=makeStream.current();capture.current=stream;
-      const audio=stream.getAudioTracks().length>0;
       for(const mime of choices(audio)){
         if(mime&&!MediaRecorder.isTypeSupported(mime))continue;
         let r;
@@ -180,7 +171,7 @@ export default function CameraCapture({onTake,disabled=false,children}) {
             recorder.current=null;clearTimeout(timer.current);stopTracks();
             const type=r.mimeType||chunks[0]?.type||'',blob=new Blob(chunks,{type});
             if(stopped-started<2700||stopped-started>3500||blob.size<=0||blob.size>MAX||!/^video\/(mp4|webm)(;|$)/i.test(type)){setMode('idle');setMessage('Recording timing or format was invalid. Please retake.');return;}
-            url.current=URL.createObjectURL(blob);setReview(url.current);onTake(blob);setMode('review');setMessage('Review your scene or retake.');
+            reviewBlob(blob);
           };
           // Encoders can emit the start event well after capturing the opening frames.
           // Time the take from the successful start call in the user's tap handler.
@@ -217,7 +208,7 @@ export default function CameraCapture({onTake,disabled=false,children}) {
       </div>
       {mode==='idle'||mode==='opening'
         ? <button className="ptm-primary" disabled={disabled||landscape||busy} onClick={()=>openCamera()}>{mode==='opening'?'Opening camera…':'Open camera'}</button>
-        : <button className="ptm-primary" disabled={disabled||landscape||mode!=='preview'} onClick={record}>{mode==='recording'?'Recording…':'Record 3 seconds'}</button>}
+        : <button className="ptm-primary" disabled={disabled||landscape||mode!=='preview'} onClick={record}>{mode==='recording'?'Recording…':mode==='finishing'?'Saving…':'Record 3 seconds'}</button>}
     </>}
   </section>;
 }
