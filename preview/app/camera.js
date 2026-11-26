@@ -86,7 +86,7 @@ export default function CameraCapture({onTake,disabled=false,children}) {
       if(nextMic&&!s.getAudioTracks().some(track=>track.readyState==='live'&&track.enabled)){
         interrupt('No microphone input. Allow microphone access, or switch Mic off.');return;
       }
-      video.current.srcObject=s;await video.current.play();
+      video.current.srcObject=/Android/i.test(navigator.userAgent)?new MediaStream(s.getVideoTracks()):s;await video.current.play();
       if(ticket!==epoch.current||!alive.current){s.getTracks().forEach(t=>t.stop());return;}
       if(landscapeNow()){interrupt('Camera paused. Open it again.');return;}
       const w=video.current.videoWidth,h=video.current.videoHeight;
@@ -96,7 +96,7 @@ export default function CameraCapture({onTake,disabled=false,children}) {
       if(/Android/i.test(navigator.userAgent)&&window.VideoEncoder&&window.VideoFrame){
         const {prepareAndroidTake}=await import('./android-take');
         if(ticket!==epoch.current)return;
-        const prepared=await prepareAndroidTake(video.current,s.getAudioTracks()[0],needsCrop?W:w,needsCrop?H:h,crop(w,h));
+        const prepared=await prepareAndroidTake(video.current,s,needsCrop?W:w,needsCrop?H:h,crop(w,h));
         if(ticket!==epoch.current){prepared?.cancel();return;}
         androidTake.current=prepared;
       }
