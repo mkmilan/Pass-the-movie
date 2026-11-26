@@ -1,0 +1,46 @@
+name: Verify Device Farm access
+on:
+  push:
+    branches: [test/aws-devicefarm-access]
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  connection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check branch identity and read-only AWS access
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_DEVICEFARM_ROLE_ARN }}
+          AWS_REGION: us-west-2
+          AWS_ROLE_SESSION_NAME: PassTheMovieDeviceFarmCheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          export AWS_WEB_IDENTITY_TOKEN_FILE="$RUNNER_TEMP/devicefarm-identity"
+          trap 'rm -f "$AWS_WEB_IDENTITY_TOKEN_FILE"' EXIT
+          python3 - <<'PY'
+          import base64, json, os, urllib.request
+          env = os.environ
+          req = urllib.request.Request(env["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=sts.amazonaws.com",
+                headers={"Authorization": "Bearer " + env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})
+          with urllib.request.urlopen(req, timeout=20) as response:
+              token = json.load(response)["value"]
+          payload = token.split(".")[1]
+          claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+          print("GitHub branch identity:", claims["sub"])
+          expected = "repo:mkmilan@13180642/Pass-the-movie@1470033537:ref:refs/heads/test/aws-devicefarm-access"
+          if claims["sub"] != expected or claims["aud"] != "sts.amazonaws.com":
+              raise SystemExit("The AWS trust policy and branch identity must match.")
+          with open(env["AWS_WEB_IDENTITY_TOKEN_FILE"], "w") as file:
+              file.write(token)
+          PY
+          if [[ -z "$AWS_ROLE_ARN" ]]; then
+            echo "GitHub identity checked. AWS connection pending owner setup."
+            exit 0
+          fi
+          # Suppress account details in this public repository's workflow logs.
+          aws devicefarm get-account-settings --region "$AWS_REGION" --output json >/dev/null
+          echo "Verified Device Farm read access in us-west-2."
